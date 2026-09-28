@@ -69,8 +69,18 @@
           OpenAI（api.openai.com/v1 · gpt-4o-mini）、本地 Ollama（localhost:11434/v1 · qwen2.5:7b）。
           <br>连不上时：①确认当前网络已完成网页认证，或直接换手机热点；②开启本机代理软件后，在上方填写代理地址再“测试连接”。
         </div>
-        <button class="btn btn-primary" onclick="saveAi()">保存 AI 配置</button>
-        <button class="btn btn-ghost" onclick="testAi()" style="margin-left:8px">测试连接</button>
+        <div class="settings-section" style="border-top:1px dashed #e2e8f0;margin-top:14px;padding-top:12px">
+          <h4>统一 AI 配置 <span style="font-weight:400;font-size:12px;color:#94a3b8">智安盾与 Shelling 共用这一份模型配置</span></h4>
+          <div id="aiUnifiedBox" style="font-size:12.5px;color:#64748b;line-height:1.9;margin-bottom:8px">读取中…</div>
+          <button class="btn btn-ghost" onclick="syncAiToShelling()">同步到 Shelling</button>
+          <div style="margin-top:8px;font-size:12px;color:#94a3b8;line-height:1.8">
+            智安盾的 Base URL / 模型 / API Key 是全系统唯一配置源。保存时自动同步给 Shelling，
+            使 Shelling 扫描同样具备 AI 分析（漏洞摘要、AI 分析、整改建议、误报评分）。<br>
+            注意：上方「网络代理」只对智安盾生效，Shelling 侧不支持代理。
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="saveAi()" style="margin-top:10px">保存 AI 配置</button>
+        <button class="btn btn-ghost" onclick="testAi()" style="margin-left:8px;margin-top:10px">测试连接</button>
       </div>
     </div>
 
@@ -216,7 +226,8 @@ async function saveAi() {
     proxy: document.getElementById("sAiProxy").value.trim(),
     timeout: parseInt(document.getElementById("sAiTimeout").value) || 120,
   }});
-  if (r.code === 0) { ZhiShield.success("AI 配置已保存"); loadAi(); } else ZhiShield.error(r.msg);
+  if (r.code === 0) { ZhiShield.success(r.msg || "AI 配置已保存"); loadAi(); loadAiUnified(); }
+  else ZhiShield.error(r.msg);
 }
 
 async function testAi() {
@@ -241,6 +252,61 @@ async function testAi() {
     } else ZhiShield.error("连接失败：" + r.msg);
   } catch (e) { ZhiShield.error("连接失败：" + e.message); }
   finally { if (btn) { btn.disabled = false; btn.innerHTML = old; } }
+}
+
+/* ---------- 统一 AI 配置：Shelling 侧状态与同步 ---------- */
+async function loadAiUnified() {
+  const box = document.getElementById("aiUnifiedBox");
+  if (!box) return;
+  let r;
+  try { r = await ZhiShield.api("/api/settings/ai/shelling"); }
+  catch (e) { box.textContent = "读取 Shelling 状态失败：" + e.message; return; }
+  if (!r || r.code !== 0) { box.textContent = "读取 Shelling 状态失败"; return; }
+  const d = r.data || {};
+  if (!d.reachable) {
+    box.innerHTML = `<span style="color:#f59e0b">⚠ 未能连接 Shelling 扫描平台</span>
+      <br><span style="font-size:12px">${ZhiShield.esc(d.error || "")}</span>
+      <br>请先在下方「🛰 Shelling 扫描平台」卡片确认服务地址与账号密码。`;
+    return;
+  }
+  const synced = d.synced, main = d.active_main, sub = d.active_sub;
+  let html = `Shelling 侧现有 <b>${d.total}</b> 个 LLM 配置。`;
+  if (synced) {
+    const okMain = main && main.id === synced.id;
+    const okSub = sub && sub.id === synced.id;
+    const keyTip = synced.has_api_key ? "" : "，<span style=\"color:#ef4444\">缺少 API Key</span>";
+    html += `<br><span style="color:#16a34a">✔ 已统一</span>：配置「${ZhiShield.esc(synced.name)}」，
+      模型 <b>${ZhiShield.esc(synced.model)}</b>（${ZhiShield.esc(synced.provider || "")}）${keyTip}`;
+    html += `<br>主 Agent：${okMain ? "✔ 使用该配置" : "✘ 未生效（当前：" + ZhiShield.esc(main ? main.name : "无") + "）"}`;
+    html += `　子 Agent：${okSub ? "✔ 使用该配置" : "✘ 未生效（当前：" + ZhiShield.esc(sub ? sub.name : "无") + "）"}`;
+  } else if (!d.total) {
+    html += `<br><span style="color:#f59e0b">⚠ Shelling 侧未配置 LLM</span>，
+      扫描会跳过 AI 分析（漏洞仍会被扫描出来，但没有 AI 摘要与分析）。<br>
+      填好上方 API Key 后点「同步到 Shelling」即可统一。`;
+  } else {
+    const cur = (main || sub || {}).name || "未知";
+    html += `<br><span style="color:#f59e0b">⚠ 尚未统一</span>：Shelling 当前生效的是「${ZhiShield.esc(cur)}」，
+      与智安盾不是同一份配置。<br>点「同步到 Shelling」改为统一使用智安盾的配置。`;
+  }
+  box.innerHTML = html;
+}
+
+async function syncAiToShelling() {
+  const key = document.getElementById("sAiKey").value.trim();
+  if (!key) { ZhiShield.error("请先填写 AI API Key —— Shelling 侧需要可用的 Key 才能真正启用 AI 分析"); return; }
+  const btn = event && event.target; const old = btn ? btn.innerHTML : "";
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:14px;height:14px"></span> 同步中...'; }
+  ZhiShield.info("正在同步 AI 配置到 Shelling 并实测调用...");
+  try {
+    const r = await ZhiShield.api("/api/settings/ai/sync", { json: {
+      api_key: key,
+      base_url: document.getElementById("sAiBase").value.trim(),
+      model: document.getElementById("sAiModel").value.trim(),
+    }});
+    if (r.code === 0) ZhiShield.success(r.msg); else ZhiShield.error(r.msg);
+  } catch (e) { ZhiShield.error("同步失败：" + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = old; } }
+  loadAiUnified();
 }
 
 async function seedDemo() {
@@ -334,6 +400,7 @@ loadDataPath();
 
 loadAppearance();
 loadAi();
+loadAiUnified();
 loadShelling();
 </script>
 {% endblock %}

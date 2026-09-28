@@ -129,7 +129,94 @@ def save_ai():
         except Exception:
             pass
     save_config(cfg)
-    return jsonify(code=0, msg="AI 配置已保存")
+    # AI 配置是全系统唯一配置源：保存后自动同步给 Shelling（best-effort，失败不影响保存）
+    synced, sync_msg = _sync_ai_to_shelling(cfg.get("ai", {}))
+    msg = "AI 配置已保存"
+    if synced is True:
+        msg += "；已同步到 Shelling（" + sync_msg + "）"
+    elif synced is False:
+        msg += "；同步到 Shelling 失败：" + sync_msg
+    elif sync_msg:
+        msg += "；" + sync_msg
+    return jsonify(code=0, msg=msg, shelling_synced=synced)
+
+
+# ---------------- 统一 AI 配置：同步到 Shelling ----------------
+def _sync_ai_to_shelling(ai: dict):
+    """
+    把智安盾的 AI 配置推送到 Shelling 的 LLM 配置（幂等）。
+    返回 (是否成功, 说明)；api_key 为空时返回 (None, 说明) 表示跳过。
+    """
+    from core import shelling_client
+    base_url = (ai.get("base_url") or "").strip()
+    model = (ai.get("model") or "").strip()
+    api_key = (ai.get("api_key") or "").strip()
+    if not api_key:
+        # 没有 Key 时若强行同步，Shelling 会拿着空 Key 去调用并失败，比「不配置」更糟
+        return None, "未填写 API Key，已跳过同步"
+    if not base_url or not model:
+        return None, "Base URL 或模型为空，已跳过同步"
+    try:
+        res = shelling_client.get_client().sync_llm_config(base_url, api_key, model)
+    except shelling_client.ShellingError as e:
+        return False, str(e)
+    except Exception as e:
+        return False, f"同步异常：{e}"
+    cfg = res.get("config") or {}
+    return True, f"{'已创建' if res.get('action') == 'created' else '已更新'}配置「{cfg.get('name')}」（模型 {cfg.get('model')}）"
+
+
+@bp.get("/api/settings/ai/shelling")
+def shelling_llm_status():
+    """查看 Shelling 侧的 LLM 配置状态（是否已与智安盾统一）"""
+    from core import shelling_client
+    try:
+        st = shelling_client.get_client().llm_status()
+    except Exception as e:
+        st = {"reachable": False, "error": f"{e}", "total": 0,
+              "synced": None, "active_main": None, "active_sub": None}
+    return jsonify(code=0, data=st)
+
+
+@bp.post("/api/settings/ai/sync")
+def sync_ai_to_shelling():
+    """手动把智安盾的 AI 配置同步到 Shelling，并让 Shelling 实测一次"""
+    from core import shelling_client
+    data = request.get_json(silent=True) or {}
+    ai = get_cfg().get("ai", {})
+    # 表单里尚未保存的值也允许直接同步
+    base_url = (data.get("base_url") or ai.get("base_url") or "").strip()
+    model = (data.get("model") or ai.get("model") or "").strip()
+    api_key = (data.get("api_key") or ai.get("api_key") or "").strip()
+    if not api_key:
+        return jsonify(code=1, msg="请先填写 AI API Key —— Shelling 侧需要一个可用的 Key 才能真正启用 AI 分析")
+    try:
+        res = shelling_client.get_client().sync_llm_config(base_url, api_key, model)
+    except shelling_client.ShellingError as e:
+        return jsonify(code=1, msg=str(e))
+    except Exception as e:
+        return jsonify(code=1, msg=f"同步失败：{e}")
+
+    cfg = res.get("config") or {}
+    took_over = res.get("took_over") or []
+    msg = f"{'已创建' if res.get('action') == 'created' else '已更新'} Shelling 侧配置「{cfg.get('name')}」（模型 {cfg.get('model')}）"
+    if took_over:
+        msg += "，已接管原有生效配置：" + "、".join(took_over)
+
+    verify = data.get("verify", True)
+    test = None
+    if verify and cfg.get("id"):
+        try:
+            test = shelling_client.get_client().test_llm_config(cfg["id"])
+        except shelling_client.ShellingError as e:
+            test = {"success": False, "message": "验证请求失败", "error": str(e)}
+        if test.get("success"):
+            msg += "；Shelling 侧实测调用成功"
+        else:
+            msg += "；但 Shelling 侧实测失败：" + str(test.get("error") or test.get("message") or "")[:160]
+
+    return jsonify(code=0, msg=msg, data={"action": res.get("action"), "config": cfg,
+                                          "took_over": took_over, "test": test})
 
 
 # ---------------- Shelling 扫描平台配置 ----------------

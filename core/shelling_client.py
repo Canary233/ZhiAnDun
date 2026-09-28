@@ -31,6 +31,31 @@ STATUS_CN = {
     "COMPLETED": "已完成", "FAILED": "失败", "CANCELLED": "已取消",
 }
 
+# Shelling 侧由智安盾统一管理的 LLM 配置名（同步时按此名匹配，幂等）
+LLM_SYNC_NAME = "智安盾统一配置"
+# 统一配置在 Shelling 侧的默认模型参数（temperature 为其内部表示：实际值 * 100）
+LLM_TEMPERATURE = 10      # 0.1，安全分析场景偏确定性
+LLM_MAX_TOKENS = 4096
+LLM_PRIORITY = 100        # 高于手工创建的其他配置，便于兜底选中
+
+
+def guess_provider(base_url: str) -> str:
+    """按 base_url 推断一个易读的 provider 标识（Shelling 只用它做展示，实际走 OpenAI 兼容协议）"""
+    u = (base_url or "").lower()
+    if "deepseek" in u:
+        return "deepseek"
+    if "stepfun" in u:
+        return "stepfun"
+    if "dashscope" in u or "aliyun" in u:
+        return "qwen"
+    if "moonshot" in u:
+        return "moonshot"
+    if "localhost" in u or "127.0.0.1" in u or "host.docker.internal" in u:
+        return "local"
+    if "openai" in u:
+        return "openai"
+    return "openai"
+
 
 def status_cn(status) -> str:
     return STATUS_CN.get(str(status or "").upper(), str(status or "未知"))
@@ -137,6 +162,103 @@ class ShellingClient:
 
     def cancel_scan(self, scan_id):
         return self._request("POST", f"/api/v1/scans/{scan_id}/cancel")
+
+    # ---------------- LLM 配置（统一 AI 配置用）----------------
+    def list_llm_configs(self):
+        """列出 Shelling 侧全部 LLM 配置"""
+        data = self._request("GET", "/api/v1/settings/llm")
+        return data.get("items") or []
+
+    def create_llm_config(self, name, model, api_base_url=None, api_key=None,
+                          provider=None, temperature=LLM_TEMPERATURE,
+                          max_tokens=LLM_MAX_TOKENS,
+                          active_for_main_agent=True, active_for_sub_agent=True,
+                          priority=LLM_PRIORITY):
+        body = {
+            "name": name,
+            "provider": provider or guess_provider(api_base_url or ""),
+            "api_base_url": api_base_url or None,
+            "api_key": api_key or None,
+            "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "active_for_main_agent": bool(active_for_main_agent),
+            "active_for_sub_agent": bool(active_for_sub_agent),
+            "priority": priority,
+        }
+        return self._request("POST", "/api/v1/settings/llm", json_body=body)
+
+    def update_llm_config(self, config_id, **fields):
+        return self._request("PATCH", f"/api/v1/settings/llm/{config_id}", json_body=fields)
+
+    def test_llm_config(self, config_id):
+        """让 Shelling 用它自己的客户端实测一次（返回 success/message/error）"""
+        return self._request("POST", f"/api/v1/settings/llm/{config_id}/test")
+
+    def sync_llm_config(self, base_url, api_key, model, name=LLM_SYNC_NAME):
+        """
+        把智安盾的 AI 配置同步到 Shelling（幂等）：
+          按固定名称查找 → 存在则更新，不存在则新建 → 激活为主 Agent + 子 Agent 共用
+        返回 {"action": "created|updated", "config": {...}, "took_over": [...]}
+        """
+        base_url = (base_url or "").strip()
+        model = (model or "").strip()
+        if not base_url:
+            raise ShellingError("智安盾未配置 AI Base URL，无法同步到 Shelling")
+        if not model:
+            raise ShellingError("智安盾未配置 AI 模型，无法同步到 Shelling")
+
+        fields = {
+            "provider": guess_provider(base_url),
+            "api_base_url": base_url,
+            "api_key": (api_key or "").strip() or None,
+            "model": model,
+            "temperature": LLM_TEMPERATURE,
+            "max_tokens": LLM_MAX_TOKENS,
+            "active_for_main_agent": True,
+            "active_for_sub_agent": True,
+            "is_enabled": True,
+            "priority": LLM_PRIORITY,
+        }
+
+        configs = self.list_llm_configs()
+        existing = next((c for c in configs if (c.get("name") or "").strip() == name), None)
+        # 记录本次接管前，Shelling 侧原有的生效配置，便于如实反馈
+        took_over = [c.get("name") for c in configs
+                     if (c.get("active_for_main_agent") or c.get("active_for_sub_agent"))
+                     and (c.get("name") or "").strip() != name]
+
+        if existing:
+            cfg = self.update_llm_config(existing["id"], **fields)
+            action = "updated"
+        else:
+            # Shelling 的创建接口不接受 is_enabled（新建默认即为启用），仅在更新时下发
+            create_fields = {k: v for k, v in fields.items() if k != "is_enabled"}
+            cfg = self.create_llm_config(name=name, **create_fields)
+            action = "created"
+        return {"action": action, "config": cfg, "took_over": took_over}
+
+    def llm_status(self):
+        """汇总 Shelling 侧 LLM 配置状态，供智安盾设置页展示"""
+        try:
+            configs = self.list_llm_configs()
+        except ShellingError as e:
+            return {"reachable": False, "error": str(e), "total": 0, "synced": None,
+                    "active_main": None, "active_sub": None}
+        synced = next((c for c in configs if (c.get("name") or "").strip() == LLM_SYNC_NAME), None)
+        active_main = next((c for c in configs if c.get("active_for_main_agent")), None)
+        active_sub = next((c for c in configs if c.get("active_for_sub_agent")), None)
+
+        def brief(c):
+            if not c:
+                return None
+            return {"id": c.get("id"), "name": c.get("name"), "model": c.get("model"),
+                    "provider": c.get("provider"), "api_base_url": c.get("api_base_url"),
+                    "has_api_key": bool(c.get("has_api_key"))}
+
+        return {"reachable": True, "error": None, "total": len(configs),
+                "synced": brief(synced), "active_main": brief(active_main),
+                "active_sub": brief(active_sub)}
 
     def wait_for_scan(self, scan_id, timeout=None, interval=3.0, on_tick=None):
         """阻塞等待扫描结束（供脚本/同步场景使用），返回最终 progress"""
