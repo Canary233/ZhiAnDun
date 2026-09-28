@@ -3,6 +3,18 @@
 {% block page_title %}系统设置{% endblock %}
 {% block page_crumb %}系统 / 外观 · AI · 数据{% endblock %}
 
+{% block head %}
+<style>
+  /* 模型勾选列表 */
+  .ai-model-item{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid #e2e8f0;
+    border-radius:8px;font-size:12.5px;color:#475569;background:#fff;cursor:pointer;user-select:none}
+  .ai-model-item:hover{border-color:#93c5fd;background:#f8fbff}
+  .ai-model-item.on{border-color:#2563eb;background:#eff6ff;color:#1d4ed8;font-weight:600}
+  .ai-model-item input{margin:0;cursor:pointer}
+  .ai-model-empty{font-size:12.5px;color:#94a3b8}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="layout" style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
   <div class="card">
@@ -58,15 +70,27 @@
         <div class="form-grid">
           <div class="form-item full"><label>API Key（仅保存在本机 config.json）</label><input class="input" id="sAiKey" type="password" placeholder="sk-..."></div>
           <div class="form-item"><label>Base URL</label><input class="input" id="sAiBase" placeholder="https://api.stepfun.com/v1"></div>
-          <div class="form-item"><label>模型</label><input class="input" id="sAiModel" placeholder="step-3.5-flash"></div>
           <div class="form-item"><label>超时（秒）</label><input class="input" id="sAiTimeout" type="number" value="120"></div>
+          <div class="form-item full">
+            <label>模型 <span style="font-weight:400;color:#94a3b8;font-size:12px">从上游获取后勾选，无需手填</span></label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input class="input" id="sAiModel" readonly placeholder="点「从上游获取模型」后勾选"
+                     style="flex:1;min-width:200px;background:#f8fafc">
+              <button class="btn btn-ghost btn-sm" onclick="fetchAiModels()">⬇ 从上游获取模型</button>
+              <button class="btn btn-ghost btn-sm" id="aiModelManualBtn" onclick="toggleManualModel()">手动填写</button>
+            </div>
+            <div id="aiModelList" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
+            <div id="aiModelTip" style="margin-top:6px;font-size:12px;color:#94a3b8">读取中…</div>
+          </div>
           <div class="form-item full"><label>网络代理（可选）<span style="font-weight:400;color:#ef4444;font-size:12px"> 校园网/酒店等需网页认证，或接口被网络拦截时填写</span></label>
             <input class="input" id="sAiProxy" placeholder="留空直连；例如 http://127.0.0.1:7897（Clash）、http://127.0.0.1:7890"></div>
         </div>
         <div style="margin:10px 0;font-size:12.5px;color:#64748b;line-height:1.9">
-          常用接入：DeepSeek（api.deepseek.com/v1 · deepseek-chat）、阶跃星辰（api.stepfun.com/v1 · step-3.5-flash）、
-          通义千问（dashscope.aliyuncs.com/compatible-mode/v1 · qwen-turbo）、
-          OpenAI（api.openai.com/v1 · gpt-4o-mini）、本地 Ollama（localhost:11434/v1 · qwen2.5:7b）。
+          常用接入：DeepSeek（api.deepseek.com/v1）、阶跃星辰（api.stepfun.com/v1）、
+          通义千问（dashscope.aliyuncs.com/compatible-mode/v1）、
+          OpenAI（api.openai.com/v1）、本地 Ollama（localhost:11434/v1）。
+          <br>模型不用记名字：填好 Base URL 与 API Key 后点「⬇ 从上游获取模型」，在列表里勾选一个即可
+          （打开本页时会自动拉取一次；上游返回不了列表时，可点「手动填写」）。
           <br>连不上时：①确认当前网络已完成网页认证，或直接换手机热点；②开启本机代理软件后，在上方填写代理地址再“测试连接”。
         </div>
         <div class="settings-section" style="border-top:1px dashed #e2e8f0;margin-top:14px;padding-top:12px">
@@ -197,6 +221,138 @@ async function loadAi() {
   document.getElementById("sAiTimeout").value = d.timeout || 120;
   document.getElementById("sAiProxy").value = d.proxy || "";
   document.getElementById("aiStatus").textContent = d.api_key ? "已配置" : "未配置";
+  renderAiModels(d.model || "");
+  // 已配置时自动从上游拉一次模型列表，省得每次手点
+  if (d.api_key && d.base_url) fetchAiModels(true);
+}
+
+/* ---------- 模型：从上游获取 + 勾选 ---------- */
+let aiModelOptions = [];   // 最近一次从上游拿到的模型列表
+
+/* 渲染勾选列表；selected 省略时取当前输入框里的值 */
+function renderAiModels(selected) {
+  const box = document.getElementById("aiModelList");
+  if (!box) return;
+  const cur = (selected === undefined ? document.getElementById("sAiModel").value : selected) || "";
+  // 已保存的模型若不在上游列表里，也一并列出并标注，避免配置“凭空消失”
+  const list = aiModelOptions.slice();
+  if (cur && !list.includes(cur)) list.unshift(cur);
+
+  box.innerHTML = "";
+  list.forEach(name => {
+    const lab = document.createElement("label");
+    lab.className = "ai-model-item" + (name === cur ? " on" : "");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = (name === cur);
+    cb.dataset.model = name;
+    cb.addEventListener("change", () => pickAiModel(name, cb.checked));
+    const span = document.createElement("span");
+    span.textContent = name;
+    lab.appendChild(cb);
+    lab.appendChild(span);
+    if (name === cur && !aiModelOptions.includes(name)) {
+      const em = document.createElement("span");
+      em.style.cssText = "color:#94a3b8;font-size:12px";
+      em.textContent = "（已保存，上游未返回）";
+      lab.appendChild(em);
+    }
+    box.appendChild(lab);
+  });
+  syncAiModelSelection();
+}
+
+/* 按当前选用值同步勾选态、高亮与提示文案（原地更新，不重建 DOM） */
+function syncAiModelSelection() {
+  const cur = document.getElementById("sAiModel").value || "";
+  document.querySelectorAll("#aiModelList .ai-model-item").forEach(lab => {
+    const cb = lab.querySelector("input");
+    const on = !!cb && cb.dataset.model === cur;
+    if (cb) cb.checked = on;
+    lab.classList.toggle("on", on);
+  });
+  const tip = document.getElementById("aiModelTip");
+  if (!tip) return;
+  if (!aiModelOptions.length && !cur) {
+    tip.innerHTML = '<span style="color:#f59e0b">尚未获取到模型列表</span>：填好 API Key 与 Base URL 后点「⬇ 从上游获取模型」';
+  } else if (!aiModelOptions.length) {
+    tip.innerHTML = `当前模型 <b>${ZhiShield.esc(cur)}</b>（上游未返回列表，可点「手动填写」或「⬇ 从上游获取模型」重试）`;
+  } else {
+    tip.innerHTML = `已从上游获取 <b>${aiModelOptions.length}</b> 个模型` +
+      (cur ? `，当前选用 <b>${ZhiShield.esc(cur)}</b>` : "，请勾选一个");
+  }
+}
+
+/* 勾选即选用（全系统只用一个模型，勾一个自动取消其他） */
+function pickAiModel(name, checked) {
+  const hidden = document.getElementById("sAiModel");
+  if (!checked && hidden.value === name) {
+    hidden.value = "";
+    syncAiModelSelection();
+    ZhiShield.info("已取消选择，保存后将不指定模型");
+    return;
+  }
+  if (checked) {
+    hidden.value = name;
+    ZhiShield.info(`已选用模型：${name} —— 点「保存 AI 配置」生效`);
+  }
+  syncAiModelSelection();
+}
+
+/* 从上游（GET {base_url}/models）拉取模型列表；silent=true 时失败不弹错误提示 */
+async function fetchAiModels(silent) {
+  const key = document.getElementById("sAiKey").value.trim();
+  const tip = document.getElementById("aiModelTip");
+  if (!key) {
+    if (tip) tip.innerHTML = '<span style="color:#f59e0b">请先填写 API Key</span>，再点「⬇ 从上游获取模型」';
+    if (!silent) ZhiShield.error("请先填写 API Key");
+    return;
+  }
+  if (tip) tip.innerHTML = '<span class="spinner" style="width:12px;height:12px;display:inline-block;vertical-align:-2px"></span> 正在从上游获取模型列表…';
+  let r;
+  try {
+    r = await ZhiShield.api("/api/ai/ping", { json: {
+      api_key: key,
+      base_url: document.getElementById("sAiBase").value.trim(),
+      proxy: document.getElementById("sAiProxy").value.trim(),
+    }});
+  } catch (e) {
+    aiModelOptions = [];
+    renderAiModels();
+    if (tip) tip.innerHTML = `<span style="color:#ef4444">获取失败</span>：${ZhiShield.esc(e.message || "请求异常")}`;
+    if (!silent) ZhiShield.error("获取模型列表失败：" + (e.message || "请求异常"));
+    return;
+  }
+  if (r && r.code === 0 && r.data && Array.isArray(r.data.models) && r.data.models.length) {
+    aiModelOptions = r.data.models;
+    renderAiModels();
+    if (!silent) ZhiShield.success(`已获取 ${aiModelOptions.length} 个模型，勾选一个即可`);
+  } else {
+    aiModelOptions = [];
+    renderAiModels();
+    const msg = (r && r.msg) || "上游未返回模型列表";
+    if (tip) tip.innerHTML = `<span style="color:#f59e0b">获取失败</span>：${ZhiShield.esc(msg)}`;
+    if (!silent) ZhiShield.error(msg);
+  }
+}
+
+/* 上游拿不到列表时的兜底：解锁输入框手动填写 */
+function toggleManualModel() {
+  const box = document.getElementById("sAiModel");
+  const btn = document.getElementById("aiModelManualBtn");
+  const on = box.hasAttribute("readonly");
+  if (on) {
+    box.removeAttribute("readonly");
+    box.style.background = "#fff";
+    box.focus();
+    if (btn) btn.textContent = "改用勾选";
+    ZhiShield.info("已解锁输入框，可直接填写模型名");
+  } else {
+    box.setAttribute("readonly", "readonly");
+    box.style.background = "#f8fafc";
+    if (btn) btn.textContent = "手动填写";
+    renderAiModels();
+  }
 }
 
 async function saveAi() {
@@ -226,6 +382,8 @@ async function testAi() {
     }});
     if (r.code === 0) {
       const d = r.data || {};
+      // 测试连接会一并返回上游模型列表，顺手刷新勾选项
+      if (Array.isArray(d.models) && d.models.length) { aiModelOptions = d.models; renderAiModels(); }
       const modelTip = d.current_model
         ? (d.current_online ? `，当前模型「${d.current_model}」可用 ✔` : `，但当前模型「${d.current_model}」不在可用列表，请核对模型名`)
         : "";
