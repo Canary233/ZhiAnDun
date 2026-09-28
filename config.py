@@ -52,8 +52,9 @@ DEFAULTS = {
         "api_key": "",
         "timeout": 120
     },
-    # ---- Shelling 漏洞扫描平台（敏感，仅本地 config.json）----
-    # base_url 指向 Shelling 后端 API；容器内访问宿主机端口用 host.docker.internal
+    # ---- 内置漏洞扫描引擎（已合入代码，无界面配置项）----
+    # 智安盾内置调用扫描引擎（Shelling 后端 API），下面是内置默认值，开箱即用；
+    # 若部署在别处，可在 config.json 里用同名的 shelling 段覆盖（没有界面入口）。
     "shelling": {
         "base_url": "http://host.docker.internal:8000",
         "username": "admin",
@@ -90,6 +91,10 @@ def save_config(cfg: dict) -> None:
             merged.setdefault(k, {}).update(v)
         else:
             merged[k] = v
+    # 扫描引擎地址与账号是代码内置默认值，与默认值相同时不落盘，
+    # 免得 config.json 里出现一份看着像「必须配置」的副本（用户手工改过则原样保留）
+    if merged.get("shelling") == DEFAULTS.get("shelling"):
+        merged.pop("shelling", None)
     CONFIG_FILE.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

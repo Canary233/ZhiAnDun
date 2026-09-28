@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-智安盾 · Shelling 扫描平台接口客户端
-=====================================
+智安盾 · 内置漏洞扫描引擎客户端
+=================================
 对接 Shelling（Hack Scan AI）开放 API，实现「一键发起扫描 → 回收漏洞结果」：
 
     登录换取 JWT → 创建扫描任务 → 轮询进度 → 拉取漏洞 → 转换为智安盾统一发现格式
 
-依赖 Shelling 后端服务（默认 http://host.docker.internal:8000，即宿主机 8000 端口）。
-账号密码仅保存在本机 config.json 的 shelling 段，不写入数据库、不出现在报告与日志中。
+扫描引擎地址与账号已作为内置默认值合入代码（默认 http://host.docker.internal:8000，
+即宿主机 8000 端口），界面上无需任何配置；如需指向别处，可在 config.json 的 shelling 段覆盖。
+这些信息不写入数据库、不出现在报告与日志中。
 """
 import time
 import threading
@@ -62,7 +63,7 @@ def status_cn(status) -> str:
 
 
 class ShellingError(Exception):
-    """Shelling 接口调用异常（msg 为可直接展示给用户的中文信息）"""
+    """扫描引擎接口调用异常（msg 为可直接展示给用户的中文信息）"""
 
 
 def _brief(resp) -> str:
@@ -77,7 +78,7 @@ def _brief(resp) -> str:
 
 
 class ShellingClient:
-    """Shelling 平台 API 客户端（线程安全，内部缓存并自动续期 JWT）"""
+    """扫描引擎 API 客户端（线程安全，内部缓存并自动续期 JWT）"""
 
     def __init__(self, base_url, username, password, timeout=600):
         self.base_url = (base_url or "").rstrip("/")
@@ -91,21 +92,21 @@ class ShellingClient:
     # ---------------- 认证 ----------------
     def _login(self):
         if not self.base_url:
-            raise ShellingError("未配置 Shelling 服务地址，请先在「系统设置 → Shelling 扫描平台」中填写")
+            raise ShellingError("未配置扫描引擎服务地址（config.py 内置默认值缺失，可在 config.json 的 shelling 段补充）")
         try:
             r = requests.post(f"{self.base_url}/api/v1/auth/login",
                               json={"username": self.username, "password": self.password},
                               timeout=_TIMEOUT_CONNECT)
         except requests.RequestException as e:
-            raise ShellingError(f"无法连接 Shelling 服务（{self.base_url}）：{e}")
+            raise ShellingError(f"无法连接扫描引擎（{self.base_url}）：{e}")
         if r.status_code != 200:
-            raise ShellingError(f"Shelling 登录失败（HTTP {r.status_code}），请核对账号密码")
+            raise ShellingError(f"扫描引擎登录失败（HTTP {r.status_code}），请核对内置账号密码")
         try:
             tok = r.json()["token"]
             self._token = tok["access_token"]
             self._token_exp = time.time() + float(tok.get("expires_in") or 1800) - _TOKEN_SAFETY
         except (KeyError, TypeError, ValueError) as e:
-            raise ShellingError(f"Shelling 登录响应格式异常：{e}")
+            raise ShellingError(f"扫描引擎登录响应格式异常：{e}")
         return self._token
 
     def _get_token(self, force=False):
@@ -121,13 +122,13 @@ class ShellingClient:
                                  headers={"Authorization": f"Bearer {token}"},
                                  timeout=_TIMEOUT_CONNECT)
         except requests.RequestException as e:
-            raise ShellingError(f"请求 Shelling 失败：{e}")
+            raise ShellingError(f"请求扫描引擎失败：{e}")
         if r.status_code == 401 and retry_on_401:
             # 令牌过期/被吊销：强制续期后重试一次
             self._get_token(force=True)
             return self._request(method, path, json_body, retry_on_401=False)
         if r.status_code >= 400:
-            raise ShellingError(f"Shelling 接口错误（HTTP {r.status_code}）：{_brief(r)}")
+            raise ShellingError(f"扫描引擎接口错误（HTTP {r.status_code}）：{_brief(r)}")
         if not r.content:
             return {}
         try:

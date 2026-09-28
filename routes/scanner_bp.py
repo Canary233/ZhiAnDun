@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""扫描器结果文件智能解析路由 + Shelling 扫描平台联动路由"""
+"""扫描器结果文件智能解析路由 + 内置漏洞扫描引擎联动路由"""
 from flask import Blueprint, request, jsonify
 
 from core import scanners, shelling_client
@@ -10,7 +10,7 @@ bp = Blueprint("scanner", __name__)
 ALLOWED_EXT = {".json", ".jsonl", ".txt", ".xml", ".log", ".csv"}
 MAX_SIZE = 20 * 1024 * 1024  # 20MB
 
-# Shelling 支持的扫描类型与中文名
+# 扫描引擎支持的扫描类型与中文名
 SCAN_TYPES = ("quick", "full", "custom")
 SCAN_TYPE_CN = {"quick": "快速扫描", "full": "全量扫描", "custom": "自定义扫描"}
 
@@ -47,7 +47,7 @@ def parse_file():
     })
 
 
-# ==================== Shelling 扫描平台联动 ====================
+# ==================== 内置漏洞扫描引擎联动 ====================
 @bp.get("/api/scanner/shelling/options")
 def shelling_options():
     """返回可选扫描类型，供前端下拉框渲染"""
@@ -58,7 +58,7 @@ def shelling_options():
 
 @bp.post("/api/scanner/shelling/start")
 def shelling_start():
-    """在 Shelling 平台创建扫描任务，立即返回任务 ID（进度由前端轮询）"""
+    """在扫描引擎创建扫描任务，立即返回任务 ID（进度由前端轮询）"""
     data = request.get_json(silent=True) or {}
     target = (data.get("target") or "").strip()
     if not target:

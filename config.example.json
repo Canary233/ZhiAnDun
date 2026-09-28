@@ -12,11 +12,5 @@
     "model": "step-3.5-flash",
     "api_key": "",
     "timeout": 120
-  },
-  "shelling": {
-    "base_url": "http://host.docker.internal:8000",
-    "username": "admin",
-    "password": "",
-    "timeout": 600
   }
 }
