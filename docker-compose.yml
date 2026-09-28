@@ -1,0 +1,18 @@
+name: zhianshield
+
+services:
+  zhianshield:
+    build: .
+    image: zhianshield:latest
+    container_name: zhianshield
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - ZS_HOST=0.0.0.0
+      - ZS_PORT=8080
+      - ZS_NO_BROWSER=1
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data:/app/data
+      - ./config.json:/app/config.json
