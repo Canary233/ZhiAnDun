@@ -13,40 +13,21 @@
   </div>
 </div>
 
-<div class="layout" style="display:grid;grid-template-columns:1fr 1fr;gap:18px" id="aiLayout">
-  <!-- 左：输入 -->
-  <div class="card">
-    <div class="card-header"><h3>① 目标资产信息</h3></div>
-    <div class="card-body">
-      <div class="form-grid">
-        <div class="form-item"><label>单位名称</label><input class="input" id="aiUnit" placeholder="XX 科技有限公司（填已有单位可带出历史域名）"></div>
-        <div class="form-item"><label>系统名称</label><input class="input" id="aiSystem" placeholder="官网/门户网站"></div>
-        <div class="form-item"><label>漏洞地址 / URL<span style="font-weight:400;color:#0ea5e9;font-size:12px"> 自动识别域名</span></label><input class="input" id="aiAddress" placeholder="http(s)://、mqtt://、IP:端口 均可"></div>
-        <div class="form-item"><label>域名</label><input class="input" id="aiDomain" placeholder="根据地址自动填入，可手动修改"></div>
-        <div class="form-item full"><div class="unit-assist" id="aiUnitAssist"></div></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header"><h3>② AI 模型配置</h3>
-      <span style="font-size:12px;color:#94a3b8" id="aiCfgStatus"></span>
-    </div>
-    <div class="card-body">
-      <div id="aiCfgBox" style="font-size:12.5px;color:#64748b;line-height:1.9">读取中…</div>
-      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-ghost btn-sm" onclick="pingAiConfig()">测试连接</button>
-        <a class="btn btn-ghost btn-sm" href="/settings">去系统设置修改</a>
-        <span style="font-size:12px;color:#94a3b8">
-          模型配置已统一到「系统设置 → AI 接口配置」，本页不再单独填写（支持 DeepSeek / 阶跃星辰 / 通义千问 / OpenAI / Ollama 等兼容接口）
-        </span>
-      </div>
+<div class="card">
+  <div class="card-header"><h3>① 目标资产信息</h3></div>
+  <div class="card-body">
+    <div class="form-grid">
+      <div class="form-item"><label>单位名称</label><input class="input" id="aiUnit" placeholder="XX 科技有限公司（填已有单位可带出历史域名）"></div>
+      <div class="form-item"><label>系统名称</label><input class="input" id="aiSystem" placeholder="官网/门户网站"></div>
+      <div class="form-item"><label>漏洞地址 / URL<span style="font-weight:400;color:#0ea5e9;font-size:12px"> 自动识别域名</span></label><input class="input" id="aiAddress" placeholder="http(s)://、mqtt://、IP:端口 均可"></div>
+      <div class="form-item"><label>域名</label><input class="input" id="aiDomain" placeholder="根据地址自动填入，可手动修改"></div>
+      <div class="form-item full"><div class="unit-assist" id="aiUnitAssist"></div></div>
     </div>
   </div>
 </div>
 
 <div class="card">
-  <div class="card-header"><h3>③ 原始漏洞数据</h3>
+  <div class="card-header"><h3>② 原始漏洞数据</h3>
     <div style="display:flex;gap:6px">
       <button class="btn btn-primary btn-sm" onclick="openShellingScan()">🛰 发起漏洞扫描</button>
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('scannerFile').click()">📂 导入扫描结果文件</button>
@@ -88,7 +69,7 @@
 
 <!-- 结果区 -->
 <div class="card" id="resultCard" style="display:none">
-  <div class="card-header"><h3>④ 分析结果（可编辑后保存/导出）</h3>
+  <div class="card-header"><h3>③ 分析结果（可编辑后保存/导出）</h3>
     <div style="display:flex;gap:8px">
       <button class="btn btn-success btn-sm" onclick="saveAllFindings()">保存到报告库</button>
       <button class="btn btn-warning btn-sm" onclick="exportFindings()">导出 Word</button>
@@ -113,7 +94,7 @@
 <script>
 let aiFindings = [], aiImages = [];
 let aiResultEditors = [];
-// 第③步的“检测过程 / 归属证明”两组多图上传区（选图即上传到服务器，getValue 返回 URL 列表）
+// 第②步的“检测过程 / 归属证明”两组多图上传区（选图即上传到服务器，getValue 返回 URL 列表）
 let globalDetailZone = null, globalProveZone = null;
 
 /* 顶部：漏洞地址自动识别域名 + 同单位历史域名/系统匹配 */
@@ -159,66 +140,6 @@ async function loadAiUnitAssets() {
       document.getElementById("aiSystem").value = c.dataset.val;
     }
   }));
-}
-
-/* AI 模型配置统一由「系统设置 → AI 接口配置」提供（也是全系统唯一配置源），本页只读展示 */
-async function loadAiConfig() {
-  const box = document.getElementById("aiCfgBox");
-  const st = document.getElementById("aiCfgStatus");
-  let r;
-  try { r = await ZhiShield.api("/api/ai/config"); }
-  catch (e) { if (box) box.textContent = "读取 AI 配置失败：" + e.message; return; }
-  const d = (r && r.code === 0 && r.data) || {};
-  if (st) st.textContent = d.configured ? "已配置 " + (d.api_key_masked || "") : "未配置";
-  if (!box) return;
-  if (!d.configured) {
-    box.innerHTML = `<span style="color:#f59e0b">⚠ 尚未配置 AI 接口</span>：请到「系统设置 → AI 接口配置」填写
-      Base URL / 模型 / API Key，保存后本页与 Shelling 扫描都会使用它。
-      <br>暂时不想填 Key，可勾选右上角「模拟模式」用演示数据走通全流程。`;
-  } else {
-    box.innerHTML = `模型 <b>${ZhiShield.esc(d.model || "（默认）")}</b>
-      　·　接口地址 ${ZhiShield.esc(d.base_url || "（默认）")}
-      　·　Key ${ZhiShield.esc(d.api_key_masked || "")}
-      <br><span style="color:#16a34a">✔ 与系统设置、Shelling 扫描使用同一份配置</span>，本页无需重复填写。`;
-  }
-  loadAiShellingLine();
-}
-
-/* 追加一行 Shelling 侧统一状态，让「全系统统一」可见 */
-async function loadAiShellingLine() {
-  const box = document.getElementById("aiCfgBox");
-  if (!box) return;
-  let r;
-  try { r = await ZhiShield.api("/api/settings/ai/shelling"); } catch (e) { return; }
-  const d = (r && r.code === 0 && r.data) || {};
-  const tip = document.createElement("div");
-  tip.style.cssText = "margin-top:4px";
-  if (!d.reachable) {
-    tip.innerHTML = `<span style="color:#f59e0b">⚠ 未能连接扫描引擎</span>，其 AI 分析是否可用请到「系统设置」确认。`;
-  } else if (d.synced) {
-    tip.innerHTML = `<span style="color:#16a34a">✔ Shelling 侧已统一</span>：配置「${ZhiShield.esc(d.synced.name)}」，模型 <b>${ZhiShield.esc(d.synced.model)}</b>。`;
-  } else {
-    tip.innerHTML = `<span style="color:#f59e0b">⚠ Shelling 侧尚未同步</span>：到「系统设置 → AI 接口配置」保存一次即可同步（Shelling 扫描的 AI 分析依赖它）。`;
-  }
-  box.appendChild(tip);
-}
-
-/* 用系统设置里保存的那份配置实测一次连接 */
-async function pingAiConfig() {
-  const btn = event && event.target; const old = btn ? btn.innerHTML : "";
-  if (btn) { btn.disabled = true; btn.innerHTML = "测试中..."; }
-  ZhiShield.info("正在测试连接...");
-  try {
-    const r = await ZhiShield.api("/api/ai/ping", { json: {} });
-    if (r.code === 0) {
-      const d = r.data || {};
-      const modelTip = d.current_model
-        ? (d.current_online ? `，当前模型「${d.current_model}」可用 ✔` : `，但当前模型「${d.current_model}」不在可用列表，请核对模型名`)
-        : "";
-      ZhiShield.success(`连接正常（${d.latency_ms} ms），共 ${d.model_count} 个可用模型${modelTip}`);
-    } else ZhiShield.error("连接失败：" + r.msg);
-  } catch (e) { ZhiShield.error("连接失败：" + e.message); }
-  finally { if (btn) { btn.disabled = false; btn.innerHTML = old; } }
 }
 
 function toggleMock() {
@@ -678,13 +599,12 @@ async function loadExportHistory() {
   el.innerHTML = html + "</tbody></table>";
 }
 
-// 初始化第③步两组多图上传区（点击/拖拽均可，选图即上传，可排序、可删除）
+// 初始化第②步两组多图上传区（点击/拖拽均可，选图即上传，可排序、可删除）
 globalDetailZone = ZhiShield.imageZone(document.getElementById("globalDetailImgs"),
   { value: [], hint: "检测过程图片（多张，导出附在检测过程之后）" });
 globalProveZone = ZhiShield.imageZone(document.getElementById("globalProveImgs"),
   { value: [], hint: "归属证明图片（多张，导出附在归属证明之后）" });
 
-loadAiConfig();
 loadExportHistory();
 </script>
 {% endblock %}
