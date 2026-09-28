@@ -33,13 +33,13 @@
       <span style="font-size:12px;color:#94a3b8" id="aiCfgStatus"></span>
     </div>
     <div class="card-body">
-      <div class="form-grid">
-        <div class="form-item"><label>API Key</label><input class="input" id="aiKey" type="password" placeholder="sk-..."></div>
-        <div class="form-item"><label>模型</label><input class="input" id="aiModel" placeholder="step-3.5-flash"></div>
-        <div class="form-item full"><label>Base URL</label><input class="input" id="aiBase" placeholder="https://api.stepfun.com/v1"></div>
-      </div>
-      <div style="margin-top:8px;font-size:12px;color:#94a3b8">
-        支持 DeepSeek / 阶跃星辰 / 通义千问 / OpenAI / Ollama 等兼容接口；在系统设置中保存后可免填。
+      <div id="aiCfgBox" style="font-size:12.5px;color:#64748b;line-height:1.9">读取中…</div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="pingAiConfig()">测试连接</button>
+        <a class="btn btn-ghost btn-sm" href="/settings">去系统设置修改</a>
+        <span style="font-size:12px;color:#94a3b8">
+          模型配置已统一到「系统设置 → AI 接口配置」，本页不再单独填写（支持 DeepSeek / 阶跃星辰 / 通义千问 / OpenAI / Ollama 等兼容接口）
+        </span>
       </div>
     </div>
   </div>
@@ -161,15 +161,64 @@ async function loadAiUnitAssets() {
   }));
 }
 
+/* AI 模型配置统一由「系统设置 → AI 接口配置」提供（也是全系统唯一配置源），本页只读展示 */
 async function loadAiConfig() {
+  const box = document.getElementById("aiCfgBox");
+  const st = document.getElementById("aiCfgStatus");
+  let r;
+  try { r = await ZhiShield.api("/api/ai/config"); }
+  catch (e) { if (box) box.textContent = "读取 AI 配置失败：" + e.message; return; }
+  const d = (r && r.code === 0 && r.data) || {};
+  if (st) st.textContent = d.configured ? "已配置 " + (d.api_key_masked || "") : "未配置";
+  if (!box) return;
+  if (!d.configured) {
+    box.innerHTML = `<span style="color:#f59e0b">⚠ 尚未配置 AI 接口</span>：请到「系统设置 → AI 接口配置」填写
+      Base URL / 模型 / API Key，保存后本页与 Shelling 扫描都会使用它。
+      <br>暂时不想填 Key，可勾选右上角「模拟模式」用演示数据走通全流程。`;
+  } else {
+    box.innerHTML = `模型 <b>${ZhiShield.esc(d.model || "（默认）")}</b>
+      　·　接口地址 ${ZhiShield.esc(d.base_url || "（默认）")}
+      　·　Key ${ZhiShield.esc(d.api_key_masked || "")}
+      <br><span style="color:#16a34a">✔ 与系统设置、Shelling 扫描使用同一份配置</span>，本页无需重复填写。`;
+  }
+  loadAiShellingLine();
+}
+
+/* 追加一行 Shelling 侧统一状态，让「全系统统一」可见 */
+async function loadAiShellingLine() {
+  const box = document.getElementById("aiCfgBox");
+  if (!box) return;
+  let r;
+  try { r = await ZhiShield.api("/api/settings/ai/shelling"); } catch (e) { return; }
+  const d = (r && r.code === 0 && r.data) || {};
+  const tip = document.createElement("div");
+  tip.style.cssText = "margin-top:4px";
+  if (!d.reachable) {
+    tip.innerHTML = `<span style="color:#f59e0b">⚠ 未能连接 Shelling 扫描平台</span>，其 AI 分析是否可用请到「系统设置」确认。`;
+  } else if (d.synced) {
+    tip.innerHTML = `<span style="color:#16a34a">✔ Shelling 侧已统一</span>：配置「${ZhiShield.esc(d.synced.name)}」，模型 <b>${ZhiShield.esc(d.synced.model)}</b>。`;
+  } else {
+    tip.innerHTML = `<span style="color:#f59e0b">⚠ Shelling 侧尚未同步</span>：到「系统设置 → AI 接口配置」保存一次即可同步（Shelling 扫描的 AI 分析依赖它）。`;
+  }
+  box.appendChild(tip);
+}
+
+/* 用系统设置里保存的那份配置实测一次连接 */
+async function pingAiConfig() {
+  const btn = event && event.target; const old = btn ? btn.innerHTML : "";
+  if (btn) { btn.disabled = true; btn.innerHTML = "测试中..."; }
+  ZhiShield.info("正在测试连接...");
   try {
-    const r = await ZhiShield.api("/api/ai/config");
-    if (r.code === 0 && r.data) {
-      if (r.data.base_url) document.getElementById("aiBase").value = r.data.base_url;
-      if (r.data.model) document.getElementById("aiModel").value = r.data.model;
-      document.getElementById("aiCfgStatus").textContent = r.data.configured ? "已配置 " + (r.data.api_key_masked || "") : "未配置（可在系统设置保存）";
-    }
-  } catch (e) {}
+    const r = await ZhiShield.api("/api/ai/ping", { json: {} });
+    if (r.code === 0) {
+      const d = r.data || {};
+      const modelTip = d.current_model
+        ? (d.current_online ? `，当前模型「${d.current_model}」可用 ✔` : `，但当前模型「${d.current_model}」不在可用列表，请核对模型名`)
+        : "";
+      ZhiShield.success(`连接正常（${d.latency_ms} ms），共 ${d.model_count} 个可用模型${modelTip}`);
+    } else ZhiShield.error("连接失败：" + r.msg);
+  } catch (e) { ZhiShield.error("连接失败：" + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = old; } }
 }
 
 function toggleMock() {
@@ -179,10 +228,7 @@ function toggleMock() {
 
 function getAiParams() {
   const mock = document.getElementById("aiMock").checked;
-  return {
-    api_key: mock ? "sk-test-mock" : document.getElementById("aiKey").value.trim(),
-    base_url: document.getElementById("aiBase").value.trim(),
-    model: document.getElementById("aiModel").value.trim(),
+  const p = {
     asset_info: {
       unit_name: document.getElementById("aiUnit").value.trim(),
       system_name: document.getElementById("aiSystem").value.trim(),
@@ -196,6 +242,9 @@ function getAiParams() {
     prove_images: globalProveZone ? globalProveZone.getValue() : [],
     template_key: document.getElementById("resTemplate") ? document.getElementById("resTemplate").value : "normal",
   };
+  // 模型配置统一由「系统设置 → AI 接口配置」提供，后端会回落到该配置；仅模拟模式用约定的 mock Key
+  if (mock) p.api_key = "sk-test-mock";
+  return p;
 }
 
 function previewImages(input) {
