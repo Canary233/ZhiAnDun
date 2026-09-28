@@ -75,6 +75,25 @@
     </div>
 
     <div class="card">
+      <div class="card-header"><h3>🛰 Shelling 扫描平台</h3><span style="font-size:12px;color:#94a3b8" id="shellingStatus"></span></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="form-item full"><label>服务地址（Shelling 后端 API）</label><input class="input" id="sShBase" placeholder="http://host.docker.internal:8000"></div>
+          <div class="form-item"><label>账号</label><input class="input" id="sShUser" placeholder="admin"></div>
+          <div class="form-item"><label>密码（仅保存在本机 config.json）</label><input class="input" id="sShPwd" type="password" placeholder="admin123456"></div>
+          <div class="form-item"><label>扫描超时（秒）</label><input class="input" id="sShTimeout" type="number" value="600"></div>
+        </div>
+        <div style="margin:10px 0;font-size:12.5px;color:#64748b;line-height:1.9">
+          配置后可在「AI 智能生成」页一键调用 Shelling 扫描目标，扫描结果自动转换为漏洞数据并生成报告。<br>
+          本系统以容器方式运行时，Shelling 部署在同一台宿主机上，地址填
+          <b>http://host.docker.internal:8000</b>（已映射到宿主机 8000 端口）；若 Shelling 部署在其他主机，填写其实际 IP 与端口。
+        </div>
+        <button class="btn btn-primary" onclick="saveShelling()">保存 Shelling 配置</button>
+        <button class="btn btn-ghost" onclick="testShelling()" style="margin-left:8px">测试连接</button>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-header"><h3>🗄 数据管理</h3></div>
       <div class="card-body">
         <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -270,9 +289,51 @@ function copyDataPath() {
   );
 }
 
+async function loadShelling() {
+  try {
+    const r = await ZhiShield.api("/api/settings/shelling");
+    if (r.code !== 0) return;
+    const d = r.data;
+    document.getElementById("sShBase").value = d.base_url || "";
+    document.getElementById("sShUser").value = d.username || "";
+    document.getElementById("sShPwd").value = d.password || "";
+    document.getElementById("sShTimeout").value = d.timeout || 600;
+    document.getElementById("shellingStatus").textContent = d.base_url ? "已配置" : "未配置";
+  } catch (e) {}
+}
+
+async function saveShelling() {
+  const r = await ZhiShield.api("/api/settings/shelling", { json: {
+    base_url: document.getElementById("sShBase").value.trim(),
+    username: document.getElementById("sShUser").value.trim(),
+    password: document.getElementById("sShPwd").value.trim(),
+    timeout: parseInt(document.getElementById("sShTimeout").value) || 600,
+  }});
+  if (r.code === 0) { ZhiShield.success("Shelling 配置已保存"); loadShelling(); } else ZhiShield.error(r.msg);
+}
+
+async function testShelling() {
+  const btn = event && event.target; const old = btn ? btn.innerHTML : "";
+  if (btn) { btn.disabled = true; btn.innerHTML = "测试中..."; }
+  ZhiShield.info("正在连接 Shelling 平台...");
+  try {
+    const r = await ZhiShield.api("/api/settings/shelling/test", { json: {
+      base_url: document.getElementById("sShBase").value.trim(),
+      username: document.getElementById("sShUser").value.trim(),
+      password: document.getElementById("sShPwd").value.trim(),
+    }});
+    if (r.code === 0) {
+      const d = r.data || {};
+      ZhiShield.success(`连接正常，Shelling 提供 ${d.scanner_count} 个可用扫描器`);
+    } else ZhiShield.error("连接失败：" + r.msg);
+  } catch (e) { ZhiShield.error("连接失败：" + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = old; } }
+}
+
 loadDataPath();
 
 loadAppearance();
 loadAi();
+loadShelling();
 </script>
 {% endblock %}

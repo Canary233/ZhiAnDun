@@ -132,6 +132,64 @@ def save_ai():
     return jsonify(code=0, msg="AI 配置已保存")
 
 
+# ---------------- Shelling 扫描平台配置 ----------------
+@bp.get("/api/settings/shelling")
+def get_shelling():
+    sh = get_cfg().get("shelling", {})
+    return jsonify(code=0, data={
+        "base_url": sh.get("base_url", ""),
+        "username": sh.get("username", ""),
+        "password": sh.get("password", ""),  # 回显明文（本地工具，便于修改）
+        "timeout": sh.get("timeout", 600),
+    })
+
+
+@bp.post("/api/settings/shelling")
+def save_shelling():
+    data = request.get_json(silent=True) or {}
+    cfg = get_cfg()
+    sh = cfg.setdefault("shelling", {})
+    for k in ("base_url", "username"):
+        if k in data:
+            sh[k] = (data[k] or "").strip()
+    if "password" in data:
+        sh["password"] = (data["password"] or "").strip()
+    if "timeout" in data:
+        try:
+            sh["timeout"] = max(30, int(data["timeout"]))
+        except Exception:
+            pass
+    save_config(cfg)
+    # 配置变更后丢弃缓存的客户端与 JWT
+    from core import shelling_client
+    shelling_client.reset_client()
+    return jsonify(code=0, msg="Shelling 配置已保存")
+
+
+@bp.post("/api/settings/shelling/test")
+def test_shelling():
+    """测试 Shelling 平台连通性：优先用表单当前值，未填则回落到已保存配置"""
+    from core import shelling_client
+    data = request.get_json(silent=True) or {}
+    try:
+        client = shelling_client.make_client(
+            base_url=(data.get("base_url") or "").strip() or None,
+            username=(data.get("username") or "").strip() or None,
+            password=(data.get("password") or "").strip() or None,
+            timeout=data.get("timeout"),
+        )
+        info = client.ping()
+    except shelling_client.ShellingError as e:
+        return jsonify(code=1, msg=str(e))
+    except Exception as e:
+        return jsonify(code=1, msg=f"连接失败：{e}")
+    return jsonify(code=0, msg="连接正常", data={
+        "base_url": info["base_url"],
+        "scanner_count": info["scanner_count"],
+        "scanners": info["scanners"][:8],
+    })
+
+
 # ---------------- 数据管理 ----------------
 @bp.post("/api/settings/seed-demo")
 def seed_demo():

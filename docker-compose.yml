@@ -16,3 +16,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./config.json:/app/config.json
+    # 允许容器内通过 host.docker.internal 访问宿主机端口（Shelling API 位于宿主 8000）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

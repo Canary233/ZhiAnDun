@@ -51,8 +51,19 @@ DEFAULTS = {
         "model": "step-3.5-flash",
         "api_key": "",
         "timeout": 120
+    },
+    # ---- Shelling 漏洞扫描平台（敏感，仅本地 config.json）----
+    # base_url 指向 Shelling 后端 API；容器内访问宿主机端口用 host.docker.internal
+    "shelling": {
+        "base_url": "http://host.docker.internal:8000",
+        "username": "admin",
+        "password": "admin123456",
+        "timeout": 600
     }
 }
+
+# 需要按子字典合并（而非整体覆盖）的配置段
+NESTED_KEYS = ("ai", "shelling")
 
 
 def load_config() -> dict:
@@ -62,8 +73,8 @@ def load_config() -> dict:
         try:
             user_cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             for k, v in user_cfg.items():
-                if k == "ai" and isinstance(v, dict):
-                    cfg["ai"].update(v)
+                if k in NESTED_KEYS and isinstance(v, dict):
+                    cfg[k].update(v)
                 else:
                     cfg[k] = v
         except Exception:
@@ -75,8 +86,8 @@ def save_config(cfg: dict) -> None:
     """将用户配置写回 config.json（保留 AI 敏感字段）"""
     merged = load_config()
     for k, v in cfg.items():
-        if k == "ai" and isinstance(v, dict):
-            merged["ai"].update(v)
+        if k in NESTED_KEYS and isinstance(v, dict):
+            merged.setdefault(k, {}).update(v)
         else:
             merged[k] = v
     CONFIG_FILE.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
