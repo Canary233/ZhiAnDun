@@ -143,10 +143,23 @@ def create_app():
         return send_from_directory(str(AI_IMAGE_DIR), filename)
 
     # ---------------- 模板上下文 ----------------
+    def _active_nav(path: str) -> str:
+        """按请求路径推断侧栏应高亮的项（与 templates/base.html 里的判断一致）"""
+        path = path or "/"
+        if path == "/":
+            return "index"
+        if path.startswith("/tools/"):
+            return "tools-" + path.rstrip("/").rsplit("/", 1)[-1]
+        if path.startswith("/reports/ai"):
+            return "report_ai"
+        return path.strip("/").split("/")[0]
+
     @app.context_processor
     def inject_globals():
         cfg = get_cfg()
         return {
+            # 侧栏高亮：按当前路径推断（模板里用 active 变量）
+            "active": _active_nav(request.path),
             "APP_NAME": "智安盾",
             "APP_TITLE": cfg.get("app_title", "智能漏洞报告自动化生成系统"),
             "APP_SUBTITLE": cfg.get("app_subtitle", ""),

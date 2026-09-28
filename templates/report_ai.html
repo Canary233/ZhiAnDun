@@ -599,12 +599,49 @@ async function loadExportHistory() {
   el.innerHTML = html + "</tbody></table>";
 }
 
+/* 从「AI 漏洞扫描」页带过来的扫描结果（sessionStorage）：自动填入第②步并提示 */
+function consumeScanHandoff() {
+  let raw = null;
+  try { raw = sessionStorage.getItem("zhianshield_scan_handoff"); } catch (e) { return; }
+  if (!raw) return;
+  try { sessionStorage.removeItem("zhianshield_scan_handoff"); } catch (e) {}
+  let d = null;
+  try { d = JSON.parse(raw); } catch (e) { return; }
+  if (!d || !Array.isArray(d.findings)) return;
+
+  aiFindings = d.findings;
+  document.getElementById("aiFindings").value = JSON.stringify(d.findings, null, 2);
+  // 目标资产信息为空时自动带入，省去手工填写
+  const addrBox = document.getElementById("aiAddress");
+  if (d.target && !addrBox.value.trim()) {
+    addrBox.value = /^[a-z]+:\/\//i.test(d.target) ? d.target : "http://" + d.target;
+    const h = ZhiShield.extractHost(addrBox.value);
+    const domBox = document.getElementById("aiDomain");
+    if (h && !domBox.value.trim()) { domBox.value = h; domBox.dataset.auto = "1"; }
+  }
+  const info = document.getElementById("scanInfo");
+  if (info) {
+    info.style.display = "";
+    const stats = Object.entries(d.severity_stats_cn || {}).map(([k, n]) =>
+      `<span class="badge badge-blue" style="margin-right:6px">${ZhiShield.esc(k)} × ${n}</span>`).join("");
+    const summary = d.llm_summary
+      ? `<div style="color:#5b21b6;font-size:12px;margin-top:4px">AI 摘要：${ZhiShield.esc(d.llm_summary)}</div>` : "";
+    info.innerHTML = `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 14px;font-size:13px">
+        已从「AI 漏洞扫描」带入目标 <b>${ZhiShield.esc(d.target || "-")}</b> 的扫描结果，
+        共 <b>${d.findings.length}</b> 条 ${stats}
+        <div style="color:#64748b;font-size:12px;margin-top:3px">已填入下方数据框，可直接点击「分析预览」或「AI 分析并生成报告」</div>
+        ${summary}</div>`;
+  }
+  ZhiShield.success(`已带入扫描结果 ${d.findings.length} 条`);
+}
+
 // 初始化第②步两组多图上传区（点击/拖拽均可，选图即上传，可排序、可删除）
 globalDetailZone = ZhiShield.imageZone(document.getElementById("globalDetailImgs"),
   { value: [], hint: "检测过程图片（多张，导出附在检测过程之后）" });
 globalProveZone = ZhiShield.imageZone(document.getElementById("globalProveImgs"),
   { value: [], hint: "归属证明图片（多张，导出附在归属证明之后）" });
 
+consumeScanHandoff();
 loadExportHistory();
 </script>
 {% endblock %}

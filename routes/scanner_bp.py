@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """扫描器结果文件智能解析路由 + 内置漏洞扫描引擎联动路由"""
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, render_template
 
 from core import scanners, shelling_client
 
@@ -48,6 +48,12 @@ def parse_file():
 
 
 # ==================== 内置漏洞扫描引擎联动 ====================
+@bp.get("/scanner")
+def scanner_page():
+    """AI 漏洞扫描：调用内置扫描引擎发起扫描、看进度、回收结果"""
+    return render_template("scanner.html")
+
+
 @bp.get("/api/scanner/shelling/options")
 def shelling_options():
     """返回可选扫描类型，供前端下拉框渲染"""
@@ -134,6 +140,37 @@ def shelling_result(scan_id):
         "severity_stats_cn": {_SEV_CN.get(k, k): v for k, v in stats.items()},
         "findings": findings,
     })
+
+
+@bp.get("/api/scanner/shelling/scans")
+def shelling_scans():
+    """列出最近扫描任务（供「AI 漏洞扫描」页展示）"""
+    try:
+        page = max(1, int(request.args.get("page") or 1))
+        page_size = max(1, min(int(request.args.get("page_size") or 10), 50))
+    except ValueError:
+        page, page_size = 1, 10
+    try:
+        data = shelling_client.get_client().list_scans(page, page_size)
+    except shelling_client.ShellingError as e:
+        return jsonify(code=1, msg=str(e)), 502
+    items = []
+    for it in (data.get("items") or []):
+        st = it.get("status") or ""
+        items.append({
+            "scan_id": it.get("id") or "",
+            "target": it.get("target") or "",
+            "scan_type": it.get("scan_type") or "",
+            "scan_type_cn": SCAN_TYPE_CN.get(it.get("scan_type") or "", it.get("scan_type") or ""),
+            "status": st,
+            "status_cn": shelling_client.status_cn(st),
+            "created_at": it.get("created_at") or "",
+            "vulnerability_count": it.get("vulnerability_count") or 0,
+            "llm_risk_score": it.get("llm_risk_score"),
+            "remark": it.get("remark") or "",
+        })
+    return jsonify(code=0, data={"total": data.get("total") or 0, "items": items,
+                                 "page": page, "page_size": page_size})
 
 
 @bp.post("/api/scanner/shelling/cancel/<scan_id>")

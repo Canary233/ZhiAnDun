@@ -164,6 +164,10 @@ class ShellingClient:
     def cancel_scan(self, scan_id):
         return self._request("POST", f"/api/v1/scans/{scan_id}/cancel")
 
+    def list_scans(self, page=1, page_size=10):
+        """列出扫描任务（「AI 漏洞扫描」页的最近扫描列表）"""
+        return self._request("GET", f"/api/v1/scans?page={int(page)}&page_size={int(page_size)}")
+
     # ---------------- LLM 配置（统一 AI 配置用）----------------
     def list_llm_configs(self):
         """列出 Shelling 侧全部 LLM 配置"""
