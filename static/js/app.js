@@ -36,6 +36,11 @@ const ZhiShield = (() => {
     const resp = await fetch(url, opts);
     let data = null;
     try { data = await resp.json(); } catch (e) { data = null; }
+    /* 登录失效：整页跳回登录页（带上来路），免得用户对着报错发呆 */
+    if (resp.status === 401 && data && data.need_login && !location.pathname.startsWith("/login")) {
+      location.href = "/login?next=" + encodeURIComponent(location.pathname + location.search);
+      throw new Error(data.msg || "登录已失效");
+    }
     if (!resp.ok && !data) {
       throw new Error(`请求失败 (${resp.status})`);
     }
@@ -373,12 +378,51 @@ const ZhiShield = (() => {
   /* 时间格式化 */
   function fmtTime(s) { return s ? String(s).slice(0, 19).replace("T", " ") : ""; }
 
+  /* 修改自己的登录密码 */
+  function changePassword() {
+    const m = openModal({
+      title: "修改密码",
+      body: `<div class="form-item"><label>原密码 <span class="req">*</span></label>
+          <input class="input" id="cpOld" type="password" autocomplete="current-password"></div>
+        <div class="form-item" style="margin-top:12px"><label>新密码 <span class="req">*</span></label>
+          <input class="input" id="cpNew" type="password" autocomplete="new-password" placeholder="至少 6 位"></div>
+        <div class="form-item" style="margin-top:12px"><label>确认新密码 <span class="req">*</span></label>
+          <input class="input" id="cpNew2" type="password" autocomplete="new-password"></div>
+        <div id="cpErr" style="min-height:18px;font-size:13px;color:var(--danger);margin-top:8px"></div>`,
+      footer: `<button class="btn btn-ghost" onclick="ZhiShield.closeModal()">取消</button>
+               <button class="btn btn-primary" id="cpOk">保存</button>`,
+    });
+    const val = (id) => m.querySelector(id).value;
+    m.querySelector("#cpOk").addEventListener("click", async () => {
+      const err = m.querySelector("#cpErr");
+      err.textContent = "";
+      if (!val("#cpOld") || !val("#cpNew")) { err.textContent = "请填写原密码与新密码"; return; }
+      if (val("#cpNew") !== val("#cpNew2")) { err.textContent = "两次输入的新密码不一致"; return; }
+      const r = await api("/api/auth/password", {
+        json: { old_password: val("#cpOld"), new_password: val("#cpNew") } });
+      if (r && r.code === 0) {
+        closeModal();
+        success(r.msg);
+        document.querySelectorAll(".alert-warn").forEach(el => el.remove());
+      } else {
+        err.textContent = (r && r.msg) || "修改失败";
+      }
+    });
+  }
+
+  /* 退出登录 */
+  async function logout() {
+    try { await api("/api/auth/logout", { json: {} }); } catch (e) { /* 网络异常也照样回登录页 */ }
+    location.href = "/login";
+  }
+
   return {
     api, toast, success, error, info,
     openModal, closeModal, confirmDialog,
     renderPagination, sevBadge, esc, rteInit,
     extractHost, imageZone,
     showLoading, fmtTime, ensureCsrf,
+    changePassword, logout,
   };
 })();
 
@@ -401,4 +445,21 @@ document.addEventListener("DOMContentLoaded", () => {
   if (menuBtn) menuBtn.addEventListener("click", () => {
     document.querySelector(".sidebar").classList.toggle("mobile-open");
   });
+
+  /* 右上角账号菜单 */
+  const userChip = document.getElementById("userChip");
+  const userMenu = document.getElementById("userMenu");
+  if (userChip && userMenu) {
+    const closeUserMenu = () => {
+      userMenu.classList.remove("open");
+      userChip.setAttribute("aria-expanded", "false");
+    };
+    userChip.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = userMenu.classList.toggle("open");
+      userChip.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    document.addEventListener("click", closeUserMenu);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeUserMenu(); });
+  }
 });

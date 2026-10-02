@@ -47,6 +47,14 @@ def postc(path, obj):
     except urllib.error.HTTPError as e:
         return json.loads(e.read().decode())
 
+# 登录（内置管理员账号，见 database.ensure_default_admin；可用环境变量 ZS_USER / ZS_PASS 覆盖）
+ZS_USER = os.environ.get("ZS_USER", "admin")
+ZS_PASS = os.environ.get("ZS_PASS", "admin123456")
+_login = postc("/api/auth/login", {"username": ZS_USER, "password": ZS_PASS})
+assert _login.get("code") == 0, f"登录失败：{_login}"
+# 登录成功会换发新的 CSRF token，需要重新取一次
+tok = get("/api/csrf")["token"]
+
 print("=" * 60, "\n1) 页面渲染")
 for p in ["/assistant", "/tools/cvss", "/", "/reports"]:
     code = op.open(BASE + p, timeout=15).getcode()

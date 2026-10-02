@@ -14,6 +14,7 @@
   reports         漏洞报告记录
   templates       报告 Word 模板（自定义）
   settings        KV 系统设置
+  users           登录账号（管理员 / 普通用户）
 """
 import sqlite3
 import threading
@@ -157,7 +158,24 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    display_name TEXT DEFAULT '',
+    role TEXT DEFAULT 'user',
+    is_active INTEGER DEFAULT 1,
+    remark TEXT DEFAULT '',
+    created_at TEXT DEFAULT '',
+    updated_at TEXT DEFAULT '',
+    last_login_at TEXT DEFAULT ''
+);
 """
+
+# 首次启动自动创建的内置管理员（仅当 users 表为空时写入，之后完全由「用户管理」维护）
+DEFAULT_ADMIN_USER = "admin"
+DEFAULT_ADMIN_PASSWORD = "admin123456"
 
 
 def init_db():
@@ -178,6 +196,27 @@ def init_db():
     if "lifecycle_at" not in cols:
         conn.execute("ALTER TABLE reports ADD COLUMN lifecycle_at TEXT DEFAULT ''")
     conn.commit()
+
+
+def ensure_default_admin():
+    """首次启动写入内置管理员账号；已存在任何账号时直接跳过（幂等）。
+
+    返回 {"created": True, "username": ..., "password": ...} 便于启动日志提示一次默认口令。
+    """
+    from core.auth import hash_password
+
+    cur = get_db().cursor()
+    n = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    cur.close()
+    if n:
+        return {"created": False}
+
+    now = now_str()
+    execute("""INSERT INTO users(username,password_hash,display_name,role,is_active,remark,created_at,updated_at)
+        VALUES(?,?,?,?,1,?,?,?)""",
+            (DEFAULT_ADMIN_USER, hash_password(DEFAULT_ADMIN_PASSWORD), "系统管理员", "admin",
+             "内置管理员账号，登录后请及时修改密码", now, now))
+    return {"created": True, "username": DEFAULT_ADMIN_USER, "password": DEFAULT_ADMIN_PASSWORD}
 
 
 def seed_demo_data():

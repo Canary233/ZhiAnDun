@@ -10,6 +10,7 @@
 """
 import os
 import json
+import secrets
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -60,7 +61,9 @@ DEFAULTS = {
         "username": "admin",
         "password": "admin123456",
         "timeout": 600
-    }
+    },
+    # ---- 登录会话签名密钥（首次运行自动生成并写回 config.json，不要手工清空）----
+    "secret_key": ""
 }
 
 # 需要按子字典合并（而非整体覆盖）的配置段
@@ -100,3 +103,17 @@ def save_config(cfg: dict) -> None:
 
 def get_cfg() -> dict:
     return load_config()
+
+
+def get_secret_key() -> str:
+    """会话签名密钥：首次运行生成后写入 config.json，重启/重建容器都不会让登录态失效"""
+    try:
+        key = load_config().get("secret_key") or ""
+        if len(key) >= 32:
+            return key
+        key = secrets.token_hex(32)
+        save_config({"secret_key": key})
+        return key
+    except Exception:
+        # 配置文件不可写时退化为进程内随机密钥（重启需重新登录）
+        return secrets.token_hex(32)

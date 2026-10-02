@@ -18,10 +18,17 @@ def post(path, data=None, files=None):
     except Exception:
         return r.status_code, r.text[:300]
 
-# CSRF
+# 登录（内置管理员账号，见 database.ensure_default_admin；可用环境变量 ZS_USER / ZS_PASS 覆盖）
+ZS_USER = os.environ.get("ZS_USER", "admin")
+ZS_PASS = os.environ.get("ZS_PASS", "admin123456")
 _, tok = get("/api/csrf")
 s.headers["X-CSRF-Token"] = tok["token"]
-print("[1] CSRF token:", tok["token"][:8], "...")
+st, r = post("/api/auth/login", {"username": ZS_USER, "password": ZS_PASS})
+assert st == 200 and r.get("code") == 0, f"登录失败（HTTP {st}）：{r}"
+# 登录成功会换发新的 CSRF token，需要重新取一次
+_, tok = get("/api/csrf")
+s.headers["X-CSRF-Token"] = tok["token"]
+print("[1] 登录成功（%s）+ CSRF token:" % ZS_USER, tok["token"][:8], "...")
 
 # 2. 批量新增单位
 st, r = post("/api/units/add", {"enterprise_name": "测试单位甲\n测试单位乙\n测试单位丙"})

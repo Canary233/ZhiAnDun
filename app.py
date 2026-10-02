@@ -8,17 +8,23 @@
 
 功能模块：
     仪表盘 / 单位管理 / 标签管理 / 域名资产 / 漏洞库 / 报告管理 /
-    AI 智能生成 / 工具管理 / 系统设置
+    AI 智能生成 / AI 漏洞扫描 / 工具管理 / 系统设置 / 用户管理
+
+访问控制：除登录页与静态资源外，所有页面与接口都需要登录；
+「用户管理」仅管理员可见可用（详见 core/auth.py）。
 """
 import os
 import secrets
 import sqlite3
+from datetime import timedelta
+from urllib.parse import quote
 
 from flask import (Flask, render_template, jsonify, request, session,
-                   send_from_directory, abort)
+                   send_from_directory, abort, redirect)
 
 import database as db
-from config import (get_cfg, DATA_DIR, UPLOAD_DIR, AI_IMAGE_DIR, VERSION)
+from config import (get_cfg, get_secret_key, DATA_DIR, UPLOAD_DIR, AI_IMAGE_DIR, VERSION)
+from core import auth
 
 # 注册蓝图
 from routes.units_bp import bp as units_bp
@@ -29,11 +35,14 @@ from routes.ai_bp import bp as ai_bp
 from routes.tools_bp import bp as tools_bp
 from routes.settings_bp import bp as settings_bp
 from routes.scanner_bp import bp as scanner_bp
+from routes.users_bp import bp as users_bp
 
 
 def create_app():
     app = Flask(__name__)
-    app.secret_key = secrets.token_hex(32)
+    # 会话签名密钥持久化在 config.json，重建容器不会让已登录用户掉线
+    app.secret_key = get_secret_key()
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
     app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB
     app.config["JSON_AS_ASCII"] = False
 
@@ -42,6 +51,14 @@ def create_app():
     # 内置标准报告模板（与原工具一致的占位符模板）幂等登记并设为默认
     from core.tpl_bootstrap import ensure_builtin_templates
     ensure_builtin_templates()
+
+    # 首次启动创建内置管理员账号
+    admin_info = db.ensure_default_admin()
+    if admin_info.get("created"):
+        print("=" * 60)
+        print("  已创建内置管理员账号：%s / %s" % (admin_info["username"], admin_info["password"]))
+        print("  请登录后到「用户管理」或右上角头像处立即修改密码")
+        print("=" * 60)
 
     # ---------------- 蓝图 ----------------
     app.register_blueprint(units_bp)
@@ -52,6 +69,31 @@ def create_app():
     app.register_blueprint(tools_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(scanner_bp)
+    app.register_blueprint(users_bp)
+
+    # ---------------- 登录校验 ----------------
+    # 免登录：登录页本身、登录接口、CSRF 取号接口、静态资源
+    PUBLIC_PATHS = {"/login", "/api/auth/login", "/api/csrf", "/favicon.ico"}
+    PUBLIC_PREFIXES = ("/static/",)
+    # 仅管理员：用户管理页面与接口
+    ADMIN_PATHS = ("/users", "/api/users")
+
+    @app.before_request
+    def require_login():
+        path = request.path
+        if path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES):
+            return None
+        user = auth.current_user()
+        if not user:
+            if path.startswith("/api/"):
+                return jsonify(code=1, msg="登录已失效，请重新登录", need_login=True), 401
+            return redirect("/login?next=" + quote(path, safe="/"))
+        if path == ADMIN_PATHS[0] or path.startswith(ADMIN_PATHS[1]):
+            if user["role"] != "admin":
+                if path.startswith("/api/"):
+                    return jsonify(code=1, msg="需要管理员权限"), 403
+                return render_template("error.html", code=403, msg="需要管理员权限"), 403
+        return None
 
     # ---------------- 轻量 CSRF 防护 ----------------
     @app.before_request
@@ -160,6 +202,9 @@ def create_app():
         return {
             # 侧栏高亮：按当前路径推断（模板里用 active 变量）
             "active": _active_nav(request.path),
+            # 当前登录用户（未登录为 None；模板里用 CURRENT_USER 控制入口与头像）
+            "CURRENT_USER": auth.current_user(),
+            "DEFAULT_PWD": bool(session.get("default_pwd")),
             "APP_NAME": "智安盾",
             "APP_TITLE": cfg.get("app_title", "智能漏洞报告自动化生成系统"),
             "APP_SUBTITLE": cfg.get("app_subtitle", ""),
