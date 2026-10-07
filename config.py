@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-智安盾 · 智能漏洞报告自动化生成系统 —— 系统配置
+智安鉴 · 智能安全检测与漏洞报告系统 —— 系统配置
 ================================================
 所有可调配置集中于此。config.json（位于项目根目录）可覆盖以下默认值，
 方便用户在不改代码的情况下调整系统。
@@ -16,8 +16,8 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 
 # ---------------- 基础信息 ----------------
-APP_NAME = "智安盾"
-APP_TITLE = "智能漏洞报告自动化生成系统"
+APP_NAME = "智安鉴"
+APP_TITLE = "智能安全检测与漏洞报告系统"
 APP_SUBTITLE = "AI 赋能 · 资产管理 · 漏洞治理 · 报告一键生成"
 VERSION = "1.0.0"
 
@@ -33,7 +33,7 @@ BUILTIN_TEMPLATE_DIR = BASE_DIR / "assets" / "builtin_templates"  # 随源码分
 for _d in (DATA_DIR, EXPORT_DIR, UPLOAD_DIR, BG_DIR, TEMPLATE_DIR, AI_IMAGE_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
-DB_PATH = DATA_DIR / "zhianshield.db"
+DB_PATH = DATA_DIR / "zhianjian.db"
 CONFIG_FILE = BASE_DIR / "config.json"
 
 # ---------------- 默认配置 ----------------
@@ -54,7 +54,7 @@ DEFAULTS = {
         "timeout": 120
     },
     # ---- 内置漏洞扫描引擎（已合入代码，无界面配置项）----
-    # 智安盾内置调用扫描引擎（Shelling 后端 API），下面是内置默认值，开箱即用；
+    # 智安鉴内置调用扫描引擎（Shelling 后端 API），下面是内置默认值，开箱即用；
     # 若部署在别处，可在 config.json 里用同名的 shelling 段覆盖（没有界面入口）。
     "shelling": {
         "base_url": "http://host.docker.internal:8000",

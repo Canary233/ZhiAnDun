@@ -28,7 +28,7 @@
         <div class="form-item"><label>扫描类型</label>
           <select class="select" id="scType"></select></div>
         <div class="form-item"><label>备注（可选）</label>
-          <input class="input" id="scRemark" placeholder="智安盾发起"></div>
+          <input class="input" id="scRemark" placeholder="智安鉴发起"></div>
       </div>
       <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
         <button class="btn btn-primary" id="scStartBtn" onclick="startScan()">开始扫描</button>
@@ -36,7 +36,7 @@
       </div>
       <div style="margin-top:10px;font-size:12.5px;color:#64748b;line-height:1.9">
         扫描由扫描引擎的多子 Agent 编排执行（资产探测 → 漏洞验证 → AI 校验 → 汇总），
-        结果会自动转换为智安盾统一的漏洞数据结构，可直接进入报告生成流程。
+        结果会自动转换为智安鉴统一的漏洞数据结构，可直接进入报告生成流程。
         <br>提示：请仅对已获得授权的目标发起扫描。
       </div>
     </div>
@@ -115,7 +115,7 @@ async function startScan() {
     const r = await ZhiShield.api("/api/scanner/shelling/start", { json: {
       target: target,
       scan_type: document.getElementById("scType").value || "quick",
-      remark: (document.getElementById("scRemark").value || "").trim() || "智安盾发起",
+      remark: (document.getElementById("scRemark").value || "").trim() || "智安鉴发起",
     }});
     if (!r || r.code !== 0) {
       box.innerHTML = `<div style="color:#ef4444;font-size:13px">提交失败：${ZhiShield.esc((r && r.msg) || "未知错误")}</div>`;
@@ -265,7 +265,7 @@ function renderResult(d) {
 function sendToReportAi() {
   if (!scLastResult) { ZhiShield.error("还没有可用的扫描结果"); return; }
   try {
-    sessionStorage.setItem("zhianshield_scan_handoff", JSON.stringify({
+    sessionStorage.setItem("zhianjian_scan_handoff", JSON.stringify({
       scan_id: scLastResult.scan_id || "",
       target: scLastResult.target || "",
       findings: scLastResult.findings || [],

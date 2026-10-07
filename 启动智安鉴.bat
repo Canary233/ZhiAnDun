@@ -1,9 +1,9 @@
 @echo off
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
-title ZhiAnDun - Intelligent Vulnerability Report System
+title ZhiAnJian - Intelligent Security Detection and Vulnerability Report System
 echo ================================================================
-echo    ZhiAnDun - Intelligent Vulnerability Report System
+echo    ZhiAnJian - Intelligent Security Detection and Vulnerability Report System
 echo    Local web app. The browser will open automatically.
 echo ================================================================
 echo.

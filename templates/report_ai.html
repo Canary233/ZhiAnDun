@@ -230,7 +230,7 @@ function openShellingScan() {
             <option value="full">全量扫描（覆盖更全面，耗时较长）</option>
           </select></div>
         <div class="form-item"><label>备注（可选）</label>
-          <input class="input" id="shRemark" placeholder="智安盾发起"></div>
+          <input class="input" id="shRemark" placeholder="智安鉴发起"></div>
       </div>
       <div id="shProgress" style="margin-top:12px"></div>
       <div style="margin-top:10px;font-size:12.5px;color:#64748b;line-height:1.9">
@@ -602,9 +602,9 @@ async function loadExportHistory() {
 /* 从「AI 漏洞扫描」页带过来的扫描结果（sessionStorage）：自动填入第②步并提示 */
 function consumeScanHandoff() {
   let raw = null;
-  try { raw = sessionStorage.getItem("zhianshield_scan_handoff"); } catch (e) { return; }
+  try { raw = sessionStorage.getItem("zhianjian_scan_handoff"); } catch (e) { return; }
   if (!raw) return;
-  try { sessionStorage.removeItem("zhianshield_scan_handoff"); } catch (e) {}
+  try { sessionStorage.removeItem("zhianjian_scan_handoff"); } catch (e) {}
   let d = null;
   try { d = JSON.parse(raw); } catch (e) { return; }
   if (!d || !Array.isArray(d.findings)) return;

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-智安盾 · 智能漏洞报告自动化生成系统 —— 应用入口
+智安鉴 · 智能安全检测与漏洞报告系统 —— 应用入口
 ================================================
 运行方式：
     py -3.10 app.py
@@ -205,8 +205,8 @@ def create_app():
             # 当前登录用户（未登录为 None；模板里用 CURRENT_USER 控制入口与头像）
             "CURRENT_USER": auth.current_user(),
             "DEFAULT_PWD": bool(session.get("default_pwd")),
-            "APP_NAME": "智安盾",
-            "APP_TITLE": cfg.get("app_title", "智能漏洞报告自动化生成系统"),
+            "APP_NAME": "智安鉴",
+            "APP_TITLE": cfg.get("app_title", "智能安全检测与漏洞报告系统"),
             "APP_SUBTITLE": cfg.get("app_subtitle", ""),
             "APP_VERSION": VERSION,
             "THEME_COLOR": cfg.get("theme_color", "#2563eb"),
@@ -254,7 +254,7 @@ if __name__ == "__main__":
     _host = os.environ.get("ZS_HOST", "127.0.0.1")
     _port = int(os.environ.get("ZS_PORT", "8080"))
     print("=" * 60)
-    print("  智安盾 · 智能漏洞报告自动化生成系统  v" + VERSION)
+    print("  智安鉴 · 智能安全检测与漏洞报告系统  v" + VERSION)
     print(f"  浏览器访问:  http://{_host}:{_port}")
     print("  按 Ctrl+C 停止服务")
     print("=" * 60)

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""智安盾 端到端功能测试脚本"""
+"""智安鉴 端到端功能测试脚本"""
 import json
 import requests
 import os
@@ -119,7 +119,7 @@ st, r = post("/api/settings/seed-demo")
 print("[18] 演示数据:", r.get("msg"))
 
 # 19. 外观设置保存
-st, r = post("/api/settings/appearance", {"app_title": "智安盾", "app_subtitle": "智能漏洞报告自动化生成系统",
+st, r = post("/api/settings/appearance", {"app_title": "智安鉴", "app_subtitle": "智能安全检测与漏洞报告系统",
                                           "theme_color": "#2563eb", "background": "", "background_overlay": 0.35,
                                           "background_blur": 0, "report_header": "网络安全测试报告", "export_org": ""})
 print("[19] 外观设置:", r.get("msg"))

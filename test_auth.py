@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""智安盾 登录 / 权限 / 用户管理 回归测试（真实 HTTP）"""
+"""智安鉴 登录 / 权限 / 用户管理 回归测试（真实 HTTP）"""
 import os
 
 import requests

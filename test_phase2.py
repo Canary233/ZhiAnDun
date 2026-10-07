@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""智安盾 第二轮新功能 端到端接口测试（真实 HTTP）"""
+"""智安鉴 第二轮新功能 端到端接口测试（真实 HTTP）"""
 import json
 import os
 import urllib.request

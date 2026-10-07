@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-智安盾 · 内置漏洞扫描引擎客户端
+智安鉴 · 内置漏洞扫描引擎客户端
 =================================
 对接 Shelling（Hack Scan AI）开放 API，实现「一键发起扫描 → 回收漏洞结果」：
 
-    登录换取 JWT → 创建扫描任务 → 轮询进度 → 拉取漏洞 → 转换为智安盾统一发现格式
+    登录换取 JWT → 创建扫描任务 → 轮询进度 → 拉取漏洞 → 转换为智安鉴统一发现格式
 
 扫描引擎地址与账号已作为内置默认值合入代码（默认 http://host.docker.internal:8000，
 即宿主机 8000 端口），界面上无需任何配置；如需指向别处，可在 config.json 的 shelling 段覆盖。
@@ -32,8 +32,8 @@ STATUS_CN = {
     "COMPLETED": "已完成", "FAILED": "失败", "CANCELLED": "已取消",
 }
 
-# Shelling 侧由智安盾统一管理的 LLM 配置名（同步时按此名匹配，幂等）
-LLM_SYNC_NAME = "智安盾统一配置"
+# Shelling 侧由智安鉴统一管理的 LLM 配置名（同步时按此名匹配，幂等）
+LLM_SYNC_NAME = "智安鉴统一配置"
 # 统一配置在 Shelling 侧的默认模型参数（temperature 为其内部表示：实际值 * 100）
 LLM_TEMPERATURE = 10      # 0.1，安全分析场景偏确定性
 LLM_MAX_TOKENS = 4096
@@ -202,16 +202,16 @@ class ShellingClient:
 
     def sync_llm_config(self, base_url, api_key, model, name=LLM_SYNC_NAME):
         """
-        把智安盾的 AI 配置同步到 Shelling（幂等）：
+        把智安鉴的 AI 配置同步到 Shelling（幂等）：
           按固定名称查找 → 存在则更新，不存在则新建 → 激活为主 Agent + 子 Agent 共用
         返回 {"action": "created|updated", "config": {...}, "took_over": [...]}
         """
         base_url = (base_url or "").strip()
         model = (model or "").strip()
         if not base_url:
-            raise ShellingError("智安盾未配置 AI Base URL，无法同步到 Shelling")
+            raise ShellingError("智安鉴未配置 AI Base URL，无法同步到 Shelling")
         if not model:
-            raise ShellingError("智安盾未配置 AI 模型，无法同步到 Shelling")
+            raise ShellingError("智安鉴未配置 AI 模型，无法同步到 Shelling")
 
         fields = {
             "provider": guess_provider(base_url),
@@ -244,7 +244,7 @@ class ShellingClient:
         return {"action": action, "config": cfg, "took_over": took_over}
 
     def llm_status(self):
-        """汇总 Shelling 侧 LLM 配置状态，供智安盾设置页展示"""
+        """汇总 Shelling 侧 LLM 配置状态，供智安鉴设置页展示"""
         try:
             configs = self.list_llm_configs()
         except ShellingError as e:
@@ -282,7 +282,7 @@ class ShellingClient:
 # ---------------- 结果转换 ----------------
 def to_findings(items, target=""):
     """
-    把 Shelling 的 VulnerabilityResponse 列表转换为智安盾统一 raw_findings 结构：
+    把 Shelling 的 VulnerabilityResponse 列表转换为智安鉴统一 raw_findings 结构：
         {"source": "shelling", "data": {title, severity, url, evidence, description, raw}}
     """
     findings = []

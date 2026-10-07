@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-智安盾 · 登录与账号权限
+智安鉴 · 登录与账号权限
 ======================
 账号保存在 SQLite 的 users 表，密码经 PBKDF2 加盐哈希后存储（不落明文、不可逆）；
 登录状态放在 Flask 的签名 session cookie 里，由 config.json 里的 secret_key 签名，

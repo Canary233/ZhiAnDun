@@ -1,10 +1,10 @@
-name: zhianshield
+name: zhianjian
 
 services:
-  zhianshield:
+  zhianjian:
     build: .
-    image: zhianshield:latest
-    container_name: zhianshield
+    image: zhianjian:latest
+    container_name: zhianjian
     restart: always
     ports:
       - "8080:8080"

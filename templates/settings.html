@@ -23,8 +23,8 @@
       <div class="settings-section">
         <h4>系统标题</h4>
         <div class="form-grid">
-          <div class="form-item"><label>主标题</label><input class="input" id="sTitle" placeholder="智安盾"></div>
-          <div class="form-item"><label>副标题</label><input class="input" id="sSubtitle" placeholder="智能漏洞报告自动化生成系统"></div>
+          <div class="form-item"><label>主标题</label><input class="input" id="sTitle" placeholder="智安鉴"></div>
+          <div class="form-item"><label>副标题</label><input class="input" id="sSubtitle" placeholder="智能安全检测与漏洞报告系统"></div>
         </div>
       </div>
       <div class="settings-section">
@@ -94,13 +94,13 @@
           <br>连不上时：①确认当前网络已完成网页认证，或直接换手机热点；②开启本机代理软件后，在上方填写代理地址再“测试连接”。
         </div>
         <div class="settings-section" style="border-top:1px dashed #e2e8f0;margin-top:14px;padding-top:12px">
-          <h4>统一 AI 配置 <span style="font-weight:400;font-size:12px;color:#94a3b8">智安盾与 Shelling 共用这一份模型配置</span></h4>
+          <h4>统一 AI 配置 <span style="font-weight:400;font-size:12px;color:#94a3b8">智安鉴与 Shelling 共用这一份模型配置</span></h4>
           <div id="aiUnifiedBox" style="font-size:12.5px;color:#64748b;line-height:1.9;margin-bottom:8px">读取中…</div>
           <button class="btn btn-ghost" onclick="syncAiToShelling()">同步到 Shelling</button>
           <div style="margin-top:8px;font-size:12px;color:#94a3b8;line-height:1.8">
-            智安盾的 Base URL / 模型 / API Key 是全系统唯一配置源。保存时自动同步给 Shelling，
+            智安鉴的 Base URL / 模型 / API Key 是全系统唯一配置源。保存时自动同步给 Shelling，
             使 Shelling 扫描同样具备 AI 分析（漏洞摘要、AI 分析、整改建议、误报评分）。<br>
-            注意：上方「网络代理」只对智安盾生效，Shelling 侧不支持代理。
+            注意：上方「网络代理」只对智安鉴生效，Shelling 侧不支持代理。
           </div>
         </div>
         <button class="btn btn-primary" onclick="saveAi()" style="margin-top:10px">保存 AI 配置</button>
@@ -425,7 +425,7 @@ async function loadAiUnified() {
   } else {
     const cur = (main || sub || {}).name || "未知";
     html += `<br><span style="color:#f59e0b">⚠ 尚未统一</span>：Shelling 当前生效的是「${ZhiShield.esc(cur)}」，
-      与智安盾不是同一份配置。<br>点「同步到 Shelling」改为统一使用智安盾的配置。`;
+      与智安鉴不是同一份配置。<br>点「同步到 Shelling」改为统一使用智安鉴的配置。`;
   }
   box.innerHTML = html;
 }

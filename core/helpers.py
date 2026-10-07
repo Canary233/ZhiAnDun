@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-智安盾 · 通用辅助函数
+智安鉴 · 通用辅助函数
 """
 import os
 import re

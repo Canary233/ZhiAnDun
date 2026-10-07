@@ -72,7 +72,7 @@ def shelling_start():
     scan_type = (data.get("scan_type") or "quick").strip().lower()
     if scan_type not in SCAN_TYPES:
         scan_type = "quick"
-    remark = (data.get("remark") or "").strip() or "智安盾发起"
+    remark = (data.get("remark") or "").strip() or "智安鉴发起"
     config = data.get("config") if isinstance(data.get("config"), dict) else None
     try:
         task = shelling_client.get_client().create_scan(
@@ -118,7 +118,7 @@ def shelling_status(scan_id):
 
 @bp.get("/api/scanner/shelling/result/<scan_id>")
 def shelling_result(scan_id):
-    """拉取扫描结果并转换为智安盾统一发现格式（可直接填入 AI 生成流程）"""
+    """拉取扫描结果并转换为智安鉴统一发现格式（可直接填入 AI 生成流程）"""
     try:
         client = shelling_client.get_client()
         task = client.get_scan(scan_id)

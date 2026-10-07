@@ -124,7 +124,7 @@ def units_template():
     wb.save(buf)
     buf.seek(0)
     return Response(buf, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={"Content-Disposition": content_disposition("【智安盾】单位导入模板.xlsx")})
+                    headers={"Content-Disposition": content_disposition("【智安鉴】单位导入模板.xlsx")})
 
 
 def _parse_ids(raw):
@@ -210,7 +210,7 @@ def units_export():
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
-    fname = f"【智安盾】单位名单_{len(rows)}个单位.xlsx"
+    fname = f"【智安鉴】单位名单_{len(rows)}个单位.xlsx"
     return Response(
         buf,
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -15,10 +15,10 @@ config.json
 # ==================== 运行时数据 ====================
 # 数据库、导出报告、上传图片均为运行时产生，不入库。
 # 首次启动时 app.py 会自动建库，演示数据可在「系统设置 → 导入演示数据」一键写入。
-data/zhianshield.db
-data/zhianshield.db-journal
-data/zhianshield.db-wal
-data/zhianshield.db-shm
+data/zhianjian.db
+data/zhianjian.db-journal
+data/zhianjian.db-wal
+data/zhianjian.db-shm
 data/exports/
 data/uploads/
 data/ai_images/

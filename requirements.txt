@@ -1,4 +1,4 @@
-# 智安盾 · 智能漏洞报告自动化生成系统
+# 智安鉴 · 智能安全检测与漏洞报告系统
 # 安装：py -3.10 -m pip install -r requirements.txt
 # Python 3.10+（推荐 3.10 / 3.11）
 Flask==3.1.0

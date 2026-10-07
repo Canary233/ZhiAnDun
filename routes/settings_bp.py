@@ -144,7 +144,7 @@ def save_ai():
 # ---------------- 统一 AI 配置：同步到 Shelling ----------------
 def _sync_ai_to_shelling(ai: dict):
     """
-    把智安盾的 AI 配置推送到 Shelling 的 LLM 配置（幂等）。
+    把智安鉴的 AI 配置推送到 Shelling 的 LLM 配置（幂等）。
     返回 (是否成功, 说明)；api_key 为空时返回 (None, 说明) 表示跳过。
     """
     from core import shelling_client
@@ -168,7 +168,7 @@ def _sync_ai_to_shelling(ai: dict):
 
 @bp.get("/api/settings/ai/shelling")
 def shelling_llm_status():
-    """查看 Shelling 侧的 LLM 配置状态（是否已与智安盾统一）"""
+    """查看 Shelling 侧的 LLM 配置状态（是否已与智安鉴统一）"""
     from core import shelling_client
     try:
         st = shelling_client.get_client().llm_status()
@@ -180,7 +180,7 @@ def shelling_llm_status():
 
 @bp.post("/api/settings/ai/sync")
 def sync_ai_to_shelling():
-    """手动把智安盾的 AI 配置同步到 Shelling，并让 Shelling 实测一次"""
+    """手动把智安鉴的 AI 配置同步到 Shelling，并让 Shelling 实测一次"""
     from core import shelling_client
     data = request.get_json(silent=True) or {}
     ai = get_cfg().get("ai", {})
@@ -358,7 +358,7 @@ def builtin_template(key):
         if os.path.exists(path):
             return send_file(
                 path, as_attachment=True,
-                download_name="智安盾-标准漏洞报告模板（含占位符）.docx",
+                download_name="智安鉴-标准漏洞报告模板（含占位符）.docx",
                 mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     """导出内置模板的 docx 说明文件，便于用户参考占位符"""
     import io
@@ -367,7 +367,7 @@ def builtin_template(key):
     from docx.oxml.ns import qn
 
     doc = Document()
-    p = doc.add_paragraph("智安盾 · 自定义报告模板占位符说明")
+    p = doc.add_paragraph("智安鉴 · 自定义报告模板占位符说明")
     for run in p.runs:
         run.font.size = Pt(18)
         run.font.bold = True
@@ -396,5 +396,5 @@ def builtin_template(key):
     doc.save(buf)
     buf.seek(0)
     return send_file(buf, as_attachment=True,
-                     download_name="智安盾-自定义模板占位符说明.docx",
+                     download_name="智安鉴-自定义模板占位符说明.docx",
                      mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
