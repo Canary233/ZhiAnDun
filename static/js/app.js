@@ -42,7 +42,9 @@ const ZhiShield = (() => {
       throw new Error(data.msg || "登录已失效");
     }
     if (!resp.ok && !data) {
-      throw new Error(`请求失败 (${resp.status})`);
+      const err = new Error(`请求失败 (${resp.status})`);
+      err.status = resp.status;
+      throw err;
     }
     return data;
   }
