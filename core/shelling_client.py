@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 # 令牌提前 60 秒视为过期，避免边界处 401
 _TOKEN_SAFETY = 60
 _TIMEOUT_CONNECT = 15
+# 攻击链分析（可能触发 LLM 重新分析）耗时较长，单独放宽超时
+_TIMEOUT_ANALYZE = 180
 # 扫描已结束（终态）状态集合
 FINISHED = ("COMPLETED", "FAILED", "CANCELLED")
 
@@ -115,18 +117,18 @@ class ShellingClient:
                 return self._login()
             return self._token
 
-    def _request(self, method, path, json_body=None, retry_on_401=True):
+    def _request(self, method, path, json_body=None, retry_on_401=True, timeout=None):
         token = self._get_token()
         try:
             r = requests.request(method, f"{self.base_url}{path}", json=json_body,
                                  headers={"Authorization": f"Bearer {token}"},
-                                 timeout=_TIMEOUT_CONNECT)
+                                 timeout=timeout or _TIMEOUT_CONNECT)
         except requests.RequestException as e:
             raise ShellingError(f"请求扫描引擎失败：{e}")
         if r.status_code == 401 and retry_on_401:
             # 令牌过期/被吊销：强制续期后重试一次
             self._get_token(force=True)
-            return self._request(method, path, json_body, retry_on_401=False)
+            return self._request(method, path, json_body, retry_on_401=False, timeout=timeout)
         if r.status_code >= 400:
             raise ShellingError(f"扫描引擎接口错误（HTTP {r.status_code}）：{_brief(r)}")
         if not r.content:
@@ -156,6 +158,16 @@ class ShellingClient:
 
     def get_progress(self, scan_id):
         return self._request("GET", f"/api/v1/scans/{scan_id}/progress")
+
+    def get_logs(self, scan_id, since_index=0):
+        """拉取扫描过程日志（增量：只取 since_index 之后的新增部分）"""
+        return self._request("GET", f"/api/v1/scans/{scan_id}/logs?since_index={int(since_index)}")
+
+    def get_attack_path(self, scan_id, refresh=False):
+        """获取攻击链分析结果（阶段 / 攻击链 / 风险评估）；refresh=True 触发 AI 重新分析"""
+        flag = "true" if refresh else "false"
+        return self._request("GET", f"/api/v1/scans/{scan_id}/attack-path?refresh={flag}",
+                             timeout=_TIMEOUT_ANALYZE)
 
     def get_vulnerabilities(self, scan_id):
         data = self._request("GET", f"/api/v1/scans/{scan_id}/vulnerabilities")

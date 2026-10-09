@@ -18,6 +18,17 @@ SCAN_TYPE_CN = {"quick": "快速扫描", "full": "全量扫描", "custom": "自�
 _SEV_CN = {"critical": "严重", "high": "高危", "medium": "中危", "low": "低危",
            "info": "信息", "unknown": "未知"}
 
+# 扫描过程日志类型中文名
+_LOG_TYPE_CN = {"info": "信息", "tool": "工具", "output": "输出",
+                "llm": "AI", "error": "错误", "success": "成功"}
+
+# 攻击链阶段中文名（引擎已给出中文 name，此处仅作兜底）
+_PHASE_CN = {"recon": "信息收集", "vuln": "漏洞发现",
+             "exploit": "漏洞利用", "impact": "潜在影响"}
+
+# 攻击链可能性 / 影响程度中文名
+_LEVEL_CN = {"critical": "严重", "high": "高", "medium": "中", "low": "低"}
+
 
 @bp.post("/api/scanner/parse")
 def parse_file():
@@ -116,6 +127,42 @@ def shelling_status(scan_id):
     })
 
 
+@bp.get("/api/scanner/shelling/logs/<scan_id>")
+def shelling_logs(scan_id):
+    """查看某次扫描的过程日志（支持 since_index 增量续拉，便于前端边跑边看）"""
+    try:
+        since = max(0, int(request.args.get("since_index") or 0))
+    except (TypeError, ValueError):
+        since = 0
+    try:
+        data = shelling_client.get_client().get_logs(scan_id, since_index=since)
+    except shelling_client.ShellingError as e:
+        return jsonify(code=1, msg=str(e)), 502
+    logs = []
+    for entry in (data.get("logs") or []):
+        if not isinstance(entry, dict):
+            continue
+        ltype = str(entry.get("type") or "info").lower()
+        logs.append({
+            "timestamp": entry.get("timestamp") or "",
+            "type": ltype,
+            "type_cn": _LOG_TYPE_CN.get(ltype, ltype),
+            "message": entry.get("message") or "",
+            "details": entry.get("details") or "",
+            "tool": entry.get("tool") or "",
+            "agent": entry.get("agent") or "",
+        })
+    next_index = data.get("next_index")
+    if next_index is None:
+        next_index = since + len(logs)
+    return jsonify(code=0, data={
+        "scan_id": data.get("scan_id") or scan_id,
+        "logs": logs,
+        "next_index": next_index,
+        "count": len(logs),
+    })
+
+
 @bp.get("/api/scanner/shelling/result/<scan_id>")
 def shelling_result(scan_id):
     """拉取扫描结果并转换为智安鉴统一发现格式（可直接填入 AI 生成流程）"""
@@ -139,6 +186,75 @@ def shelling_result(scan_id):
         "severity_stats": stats,
         "severity_stats_cn": {_SEV_CN.get(k, k): v for k, v in stats.items()},
         "findings": findings,
+    })
+
+
+@bp.get("/api/scanner/shelling/attack-path/<scan_id>")
+def shelling_attack_path(scan_id):
+    """获取某次扫描的攻击链分析（阶段 / 攻击链 / 风险评估）；refresh=true 触发 AI 重新分析"""
+    refresh = str(request.args.get("refresh") or "").lower() in ("1", "true", "yes")
+    try:
+        data = shelling_client.get_client().get_attack_path(scan_id, refresh=refresh)
+    except shelling_client.ShellingError as e:
+        return jsonify(code=1, msg=str(e)), 502
+
+    raw = data.get("data") if isinstance(data.get("data"), dict) else {}
+
+    phases = []
+    for p in (raw.get("phases") or []):
+        if not isinstance(p, dict):
+            continue
+        pid = str(p.get("id") or "")
+        phases.append({
+            "id": pid,
+            "name": p.get("name") or _PHASE_CN.get(pid, pid),
+            "description": p.get("description") or "",
+            "items": [{
+                "id": i.get("id") or "",
+                "name": i.get("name") or "",
+                "severity": str(i.get("severity") or "info").lower(),
+                "details": i.get("details") or "",
+            } for i in (p.get("items") or []) if isinstance(i, dict)],
+        })
+
+    chains = []
+    for c in (raw.get("attack_chains") or []):
+        if not isinstance(c, dict):
+            continue
+        like = str(c.get("likelihood") or "").lower()
+        impact = str(c.get("impact") or "").lower()
+        chains.append({
+            "id": c.get("id") or "",
+            "name": c.get("name") or "",
+            "description": c.get("description") or "",
+            "likelihood": like,
+            "likelihood_cn": _LEVEL_CN.get(like, ""),
+            "impact": impact,
+            "impact_cn": _LEVEL_CN.get(impact, ""),
+            "steps": [{
+                "order": s.get("order") or 0,
+                "action": s.get("action") or "",
+                "vulnerability": s.get("vulnerability") or "",
+                "result": s.get("result") or "",
+            } for s in (c.get("steps") or []) if isinstance(s, dict)],
+        })
+
+    risk = raw.get("risk_assessment") if isinstance(raw.get("risk_assessment"), dict) else {}
+    overall = str(risk.get("overall_risk") or "").lower()
+    return jsonify(code=0, data={
+        "scan_id": scan_id,
+        "cached": bool(data.get("cached")),
+        "has_chains": len(chains) > 0,
+        "phases": phases,
+        "attack_chains": chains,
+        "risk_assessment": {
+            "overall_risk": overall,
+            "overall_risk_cn": _LEVEL_CN.get(overall, ""),
+            "risk_score": risk.get("risk_score"),
+            "summary": risk.get("summary") or "",
+            "critical_paths": risk.get("critical_paths") or [],
+            "recommendations": risk.get("recommendations") or [],
+        },
     })
 
 
