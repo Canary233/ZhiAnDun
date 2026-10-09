@@ -353,13 +353,14 @@ function scTitleOf(scanId) {
   return scScanTargets[scanId] || (scanId === scLastScanId ? scLastTarget : "") || scanId;
 }
 
-/* 日志时间戳（引擎给的是 UTC ISO，转成本地时分秒展示） */
+/* 日志时间戳（引擎给的是 UTC ISO，按北京时间展示） */
 function scLogTime(ts) {
   if (!ts) return "";
   const d = new Date(ts);
   if (!isNaN(d.getTime())) {
     const p = (n) => String(n).padStart(2, "0");
-    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+    const bj = new Date(d.getTime() + 8 * 3600 * 1000);
+    return p(bj.getUTCHours()) + ":" + p(bj.getUTCMinutes()) + ":" + p(bj.getUTCSeconds());
   }
   return String(ts).slice(11, 19);
 }
@@ -643,7 +644,7 @@ async function loadRecentScans(page) {
       : (it.status === "RUNNING" || it.status === "PENDING" ? "badge-blue" : "badge-gray"));
     const risk = (it.llm_risk_score === null || it.llm_risk_score === undefined) ? "-" : it.llm_risk_score;
     return `<tr>
-        <td style="font-size:12px;color:#64748b;white-space:nowrap">${ZhiShield.fmtTime(it.created_at)}</td>
+        <td style="font-size:12px;color:#64748b;white-space:nowrap">${ZhiShield.fmtTimeUtc8(it.created_at)}</td>
         <td style="font-weight:600;word-break:break-all">${ZhiShield.esc(it.target)}</td>
         <td>${ZhiShield.esc(it.scan_type_cn)}</td>
         <td><span class="badge ${badge}">${ZhiShield.esc(it.status_cn)}</span></td>

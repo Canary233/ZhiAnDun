@@ -380,6 +380,15 @@ const ZhiShield = (() => {
   /* 时间格式化 */
   function fmtTime(s) { return s ? String(s).slice(0, 19).replace("T", " ") : ""; }
 
+  /* 扫描引擎返回的时间是 UTC ISO，统一换算为北京时间（UTC+8）后展示 */
+  function fmtTimeUtc8(s) {
+    if (!s) return "";
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return fmtTime(s);
+    const bj = new Date(d.getTime() + 8 * 3600 * 1000);
+    return bj.toISOString().slice(0, 19).replace("T", " ");
+  }
+
   /* 修改自己的登录密码 */
   function changePassword() {
     const m = openModal({
@@ -423,7 +432,7 @@ const ZhiShield = (() => {
     openModal, closeModal, confirmDialog,
     renderPagination, sevBadge, esc, rteInit,
     extractHost, imageZone,
-    showLoading, fmtTime, ensureCsrf,
+    showLoading, fmtTime, fmtTimeUtc8, ensureCsrf,
     changePassword, logout,
   };
 })();
