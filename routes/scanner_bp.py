@@ -10,8 +10,8 @@ bp = Blueprint("scanner", __name__)
 ALLOWED_EXT = {".json", ".jsonl", ".txt", ".xml", ".log", ".csv"}
 MAX_SIZE = 20 * 1024 * 1024  # 20MB
 
-# 扫描引擎支持的扫描类型与中文名
-SCAN_TYPES = ("quick", "full", "custom")
+# 智安鉴只发起全量扫描；SCAN_TYPE_CN 保留全部类型，供历史任务回显
+SCAN_TYPES = ("full",)
 SCAN_TYPE_CN = {"quick": "快速扫描", "full": "全量扫描", "custom": "自定义扫描"}
 
 # 严重等级中文名
@@ -80,9 +80,9 @@ def shelling_start():
     target = (data.get("target") or "").strip()
     if not target:
         return jsonify(code=1, msg="请填写扫描目标（域名 / IP / URL）"), 400
-    scan_type = (data.get("scan_type") or "quick").strip().lower()
+    scan_type = (data.get("scan_type") or "full").strip().lower()
     if scan_type not in SCAN_TYPES:
-        scan_type = "quick"
+        scan_type = "full"
     remark = (data.get("remark") or "").strip() or "智安鉴发起"
     config = data.get("config") if isinstance(data.get("config"), dict) else None
     try:
@@ -297,3 +297,41 @@ def shelling_cancel(scan_id):
     except shelling_client.ShellingError as e:
         return jsonify(code=1, msg=str(e)), 502
     return jsonify(code=0, msg="已请求取消扫描")
+
+
+@bp.post("/api/scanner/shelling/delete/<scan_id>")
+def shelling_delete(scan_id):
+    """删除某次扫描任务（含其结果与过程记录）；进行中的任务会先取消再删除"""
+    client = shelling_client.get_client()
+    try:
+        client.delete_scan(scan_id)
+    except shelling_client.ShellingError as e:
+        # 引擎不允许直接删除进行中的任务，先取消再重试一次
+        if "Cannot delete running task" not in str(e):
+            return jsonify(code=1, msg=str(e)), 502
+        try:
+            client.cancel_scan(scan_id)
+        except shelling_client.ShellingError:
+            pass  # 取消接口可能报错，但任务状态通常已置为已取消，继续尝试删除
+        try:
+            client.delete_scan(scan_id)
+        except shelling_client.ShellingError as e2:
+            return jsonify(code=1, msg=str(e2)), 502
+    return jsonify(code=0, msg="扫描任务已删除")
+
+
+@bp.post("/api/scanner/shelling/remark/<scan_id>")
+def shelling_update_remark(scan_id):
+    """修改某次扫描任务的备注（列表内双击编辑）"""
+    data = request.get_json(silent=True) or {}
+    remark = str(data.get("remark") or "").strip()
+    if len(remark) > 200:
+        return jsonify(code=1, msg="备注最多 200 个字符"), 400
+    try:
+        task = shelling_client.get_client().update_scan_remark(scan_id, remark)
+    except shelling_client.ShellingError as e:
+        return jsonify(code=1, msg=str(e)), 502
+    return jsonify(code=0, msg="备注已更新", data={
+        "scan_id": scan_id,
+        "remark": task.get("remark") or "",
+    })

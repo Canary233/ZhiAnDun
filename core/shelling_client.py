@@ -145,8 +145,8 @@ class ShellingClient:
         names = data.get("available_scanners") or []
         return {"base_url": self.base_url, "scanner_count": len(names), "scanners": names}
 
-    def create_scan(self, target, scan_type="quick", remark="", config=None):
-        body = {"target": target, "scan_type": scan_type or "quick"}
+    def create_scan(self, target, scan_type="full", remark="", config=None):
+        body = {"target": target, "scan_type": scan_type or "full"}
         if remark:
             body["remark"] = remark
         if config:
@@ -175,6 +175,14 @@ class ShellingClient:
 
     def cancel_scan(self, scan_id):
         return self._request("POST", f"/api/v1/scans/{scan_id}/cancel")
+
+    def delete_scan(self, scan_id):
+        """删除扫描任务（引擎会一并清理该任务的漏洞与消息记录）"""
+        return self._request("DELETE", f"/api/v1/scans/{scan_id}")
+
+    def update_scan_remark(self, scan_id, remark):
+        """修改扫描任务备注"""
+        return self._request("PATCH", f"/api/v1/scans/{scan_id}", json_body={"remark": remark})
 
     def list_scans(self, page=1, page_size=10):
         """列出扫描任务（「AI 漏洞扫描」页的最近扫描列表）"""
