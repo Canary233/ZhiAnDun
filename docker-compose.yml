@@ -192,21 +192,33 @@ networks:
 
 # 显式绑定历史卷名：合并部署不会新建空卷，引擎里已有的扫描任务/用户/配置全部沿用
 volumes:
+  # 以下 9 个卷是引擎历史数据卷（27 条扫描任务、账号、LLM 配置等），标记 external：
+  # compose 不会创建也不会删除它们，即使误用 down -v 也删不掉数据。
+  # 换新机器首次部署时先执行 scan-engine/init-volumes.sh。
   postgres_data:
+    external: true
     name: docker_postgres_data
   mongodb_data:
+    external: true
     name: docker_mongodb_data
   redis_data:
+    external: true
     name: docker_redis_data
   tools_data:
+    external: true
     name: docker_tools_data
   kali_tools:
+    external: true
     name: docker_kali_tools
   kali_output:
+    external: true
     name: docker_kali_output
   kali_logs:
+    external: true
     name: docker_kali_logs
   kali_tmp:
+    external: true
     name: docker_kali_tmp
   frontend_node_modules:
+    external: true
     name: 64ddc45c45d758fe80da5d361408c05a4dce5a9a75eb95eca1e215696d61e6a7
