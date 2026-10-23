@@ -178,3 +178,39 @@ py -3.10 test_phase2.py   # 第二轮增强功能 24 项（CVSS/扫描器/体检
 - 系统测试报告、部署与运行说明（docx + PDF）
 - 全套运行截图与视频帧、各文档/PPT/视频的可复现构建脚本
 
+---
+
+## 十、扫描引擎一体化部署（scan-engine）
+
+仓库结构：
+
+- 根目录：智安鉴业务系统（Flask，端口 8080，数据 ${DATA}/zhianjian.db）
+- `scan-engine/`：内置漏洞扫描引擎（原 Shelling），含 `backend/`（FastAPI 与 Celery 任务）、
+  `docker/`（Kali 工具容器与三个 Dockerfile）、`frontend/`（Vite，端口 3000）
+
+一条命令起全部服务：
+
+```bash
+cp config.example.json config.json                                   # 填 AI Key 与 shelling.password
+cp scan-engine/backend/.env.example scan-engine/backend/.env         # 填 SECRET_KEY / JWT_SECRET_KEY
+docker compose up -d --build                                         # 8080 智安鉴 / 3000 引擎前端 / 8000 引擎 API / 8888 Kali
+```
+
+数据与端口：
+
+| 服务 | 端口 | 存储 |
+|---|---|---|
+| 智安鉴 | 8080 | ${DATA} 目录（SQLite）+ ${CONFIG} 文件 |
+| 引擎 backend / celery | 8000 | PostgreSQL 卷 docker_postgres_data、Mongo docker_mongodb_data、Redis docker_redis_data |
+| Kali 扫描容器 | 8888 | docker_kali_tools / docker_kali_output / docker_kali_logs / docker_kali_tmp、docker_tools_data |
+| 引擎前端 | 3000 | 卷 64ddc45c45d7…（node_modules） |
+
+说明：
+
+1. compose 中卷名显式指向历史卷（docker_ 前缀），合并部署不会新建空卷，已有的扫描任务与账号直接沿用。
+2. 智安鉴默认按容器网内地址访问引擎后端（服务名 backend，端口 8000），默认值写在 config.py 的 DEFAULTS 里；可在 config.json 的 shelling 段覆盖，引擎若部署在别处只改 base_url 即可，界面无需任何配置。
+   引擎若部署在别处，只改 `base_url` 即可，界面无需任何配置。
+3. 引擎侧 `.dockerignore` 已排除 `.env`，密钥只在运行期通过 bind mount 进入容器，不会落进镜像层。
+4. 智安鉴镜像的 `.dockerignore` 已排除 `.git/`、`data/`、`config.json`、`scan-engine/`，
+   避免源码历史、业务数据库与密钥被烘进镜像。
+5. 引擎自带的前端是 Vite 开发服务器；若要对外，建议在前面加一层 Nginx/Caddy 并启用 TLS。

@@ -35,3 +35,15 @@ desktop.ini
 *.orig
 *.bak
 *.log
+
+
+# ==================== 扫描引擎（scan-engine）本地文件 ====================
+# .env 含 SECRET_KEY / JWT_SECRET_KEY / 数据库连接串，不入库；参考 .env.example
+scan-engine/backend/.env
+scan-engine/**/__pycache__/
+scan-engine/**/*.py[cod]
+scan-engine/frontend/node_modules/
+scan-engine/frontend/dist/
+scan-engine/**/*.orig
+scan-engine/**/*.bak-*
+scan-engine/backend/data/

@@ -57,7 +57,7 @@ DEFAULTS = {
     # 智安鉴内置调用扫描引擎（Shelling 后端 API），下面是内置默认值，开箱即用；
     # 若部署在别处，可在 config.json 里用同名的 shelling 段覆盖（没有界面入口）。
     "shelling": {
-        "base_url": "http://host.docker.internal:8000",
+        "base_url": "http://backend:8000",
         "username": "admin",
         "password": "admin123456",
         "timeout": 600
