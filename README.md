@@ -106,7 +106,7 @@ py -3.10 app.py
 作品赛-智安鉴智能安全检测与漏洞报告系统/
 ├── app.py                 # 主程序入口
 ├── config.py              # 系统配置
-├── database.py            # 数据访问层（SQLite）
+├── database.py            # 数据访问层（MySQL / PyMySQL）
 ├── config.json            # 用户配置（背景/AI Key 等，本地）
 ├── core/                  # 核心引擎
 │   ├── exporter.py        # Word 报告导出引擎（内置+自定义模板）
@@ -119,6 +119,7 @@ py -3.10 app.py
 │   ├── vuln_translate.py  # 漏洞名称中文化（安全术语词典）
 │   └── helpers.py         # 通用辅助
 ├── routes/                # 业务路由（单位/域名/漏洞/报告/AI/扫描器/工具/设置）
+├── scripts/               # 运维脚本（SQLite → MySQL 数据迁移）
 ├── frontend/              # 前端源码（React 18 + TypeScript + Vite + Tailwind）
 │   ├── src/pages/         # 页面（仪表盘/单位/域名/漏洞/报告/AI/扫描/工具/设置）
 │   ├── src/components/ui/ # 通用组件（表格/弹窗/表单/富文本/多图上传…）
@@ -140,7 +141,9 @@ py -3.10 app.py
 页面已从 Jinja 服务端渲染迁移为 **React 18 + TypeScript + Vite + Tailwind** 单页应用，
 视觉统一为现代扁平风格（纯色块 + 1px 描边，无渐变/毛玻璃）。
 
-- 构建产物在 `static/app/`，**已随仓库提交**：只跑 `python app.py` 即可使用，无需安装 Node；
+- 构建产物在 `static/app/`，**已随仓库提交**：无需安装 Node 即可运行前端；
+- 业务数据在 MySQL 8，本地运行前需先启动数据库（推荐 `docker compose up -d mysql`），
+  并配置环境变量 `ZS_DB_HOST / ZS_DB_PORT / ZS_DB_USER / ZS_DB_PASSWORD / ZS_DB_NAME`；
 - 改前端源码后需要重新构建：
 
 ```bash
@@ -163,7 +166,9 @@ cd frontend && npm run dev       # 终端 B：前端 http://localhost:5173
 
 ## 七、数据与安全
 
-- 全部业务数据存储于工具目录 `data/` 下，**数据不出本机**；
+- 业务数据存储于 MySQL 8（compose 卷 `zhianjian_mysql_data`），**数据不出本机**；
+  ⚠️ 升级/重装请用 `docker compose down`（**不要带 `-v`**），否则会连同数据库卷一起删除；
+- 导出报告、上传图片、背景图、报告模板仍存放在 `data/` 目录；
 - AI 密钥仅存于本地 `config.json`；
 - 写操作启用 CSRF Token 校验，前端渲染富文本前统一做 HTML 清洗（去脚本/内联事件/javascript: 协议）防 XSS；
 - 文件上传白名单校验，下载路径防目录穿越；
@@ -178,6 +183,10 @@ cd frontend && npm run dev       # 终端 B：前端 http://localhost:5173
 
 **Q2：8080 端口被占用？**
 修改 `app.py` 末尾的 `port=8080` 为其他端口后重启。
+
+**Q3：启动报「无法连接 MySQL」？**
+先启动数据库：`docker compose up -d mysql`；本地直连时确认 `ZS_DB_*` 环境变量与 MySQL 账号密码一致。
+从旧版 SQLite 升级可执行 `python3 scripts/migrate_sqlite_to_mysql.py` 迁移历史数据。
 
 **Q3：AI 生成提示接口失败？**
 检查「系统设置 → AI 接口配置」中 Base URL 与模型是否匹配、Key 是否有效，或切换为模拟模式。
@@ -216,7 +225,7 @@ py -3.10 test_phase2.py   # 第二轮增强功能 24 项（CVSS/扫描器/体检
 
 仓库结构：
 
-- 根目录：智安鉴业务系统（Flask，端口 8080，数据 ${DATA}/zhianjian.db）
+- 根目录：智安鉴业务系统（Flask，端口 8080，数据存 MySQL 8）
 - `scan-engine/`：内置漏洞扫描引擎（原 Shelling），含 `backend/`（FastAPI 与 Celery 任务）、
   `docker/`（Kali 工具容器与三个 Dockerfile）、`frontend/`（Vite，端口 3000）
 
@@ -232,7 +241,8 @@ docker compose up -d --build                                         # 8080 智�
 
 | 服务 | 端口 | 存储 |
 |---|---|---|
-| 智安鉴 | 8080 | ${DATA} 目录（SQLite）+ ${CONFIG} 文件 |
+| 智安鉴 | 8080 | MySQL 卷 `zhianjian_mysql_data` + ${DATA} 目录（导出/图片/模板）+ ${CONFIG} 文件 |
+| 智安鉴 MySQL | 3306 | 卷 `zhianjian_mysql_data`（utf8mb4） |
 | 引擎 backend / celery | 8000 | PostgreSQL 卷 docker_postgres_data、Mongo docker_mongodb_data、Redis docker_redis_data |
 | Kali 扫描容器 | 8888 | docker_kali_tools / docker_kali_output / docker_kali_logs / docker_kali_tmp、docker_tools_data |
 | 引擎前端 | 3000 | 卷 64ddc45c45d7…（node_modules） |

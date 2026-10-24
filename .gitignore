@@ -13,8 +13,8 @@ env/
 config.json
 
 # ==================== 运行时数据 ====================
-# 数据库、导出报告、上传图片均为运行时产生，不入库。
-# 首次启动时 app.py 会自动建库，演示数据可在「系统设置 → 导入演示数据」一键写入。
+# 数据库已迁移到 MySQL（容器卷），此处保留旧版 SQLite 文件忽略规则，
+# 仅用于 `scripts/migrate_sqlite_to_mysql.py` 的一次性迁移来源。
 data/zhianjian.db
 data/zhianjian.db-journal
 data/zhianjian.db-wal

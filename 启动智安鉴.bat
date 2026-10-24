@@ -26,7 +26,7 @@ echo [OK] Python found:
 %PYCMD% --version
 
 REM First run: install dependencies automatically if Flask is missing.
-%PYCMD% -c "import flask, docx, reportlab" >nul 2>nul
+%PYCMD% -c "import flask, docx, reportlab, pymysql" >nul 2>nul
 if errorlevel 1 (
     echo.
     echo [First run] Installing dependencies from requirements.txt, please wait ...
@@ -39,6 +39,18 @@ if errorlevel 1 (
         pause
         exit /b 1
     )
+)
+
+REM 业务数据存 MySQL 8：先检查数据库是否可达
+%PYCMD% -c "import os,pymysql; pymysql.connect(host=os.getenv('ZS_DB_HOST','127.0.0.1'),port=int(os.getenv('ZS_DB_PORT','3306')),user=os.getenv('ZS_DB_USER','root'),password=os.getenv('ZS_DB_PASSWORD',''),connect_timeout=3)" >nul 2>nul
+if errorlevel 1 (
+    echo.
+    echo [ERROR] MySQL is not reachable.
+    echo   - Start it with Docker:  docker compose up -d mysql
+    echo   - Or set ZS_DB_HOST / ZS_DB_PORT / ZS_DB_USER / ZS_DB_PASSWORD / ZS_DB_NAME
+    echo   - Migrate old SQLite data: python3 scripts/migrate_sqlite_to_mysql.py
+    pause
+    exit /b 1
 )
 
 echo.
