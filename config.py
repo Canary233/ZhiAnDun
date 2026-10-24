@@ -33,7 +33,6 @@ BUILTIN_TEMPLATE_DIR = BASE_DIR / "assets" / "builtin_templates"  # 随源码分
 for _d in (DATA_DIR, EXPORT_DIR, UPLOAD_DIR, BG_DIR, TEMPLATE_DIR, AI_IMAGE_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
-DB_PATH = DATA_DIR / "zhianjian.db"
 CONFIG_FILE = BASE_DIR / "config.json"
 
 # ---------------- 默认配置 ----------------

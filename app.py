@@ -15,7 +15,6 @@
 """
 import os
 import secrets
-import sqlite3
 from datetime import timedelta
 from urllib.parse import quote
 
@@ -203,8 +202,9 @@ def create_app():
             "SELECT enterprise_name, city, business_status FROM units ORDER BY id DESC LIMIT 5").fetchall()]
         # 近 6 个月报告趋势
         trend_rows = cur.execute(
-            """SELECT strftime('%Y-%m', created_at) m, COUNT(*) c FROM reports
-               WHERE status=0 AND created_at >= date('now','-6 month')
+            """SELECT SUBSTRING(created_at, 1, 7) AS m, COUNT(*) AS c FROM reports
+               WHERE status=0
+                 AND created_at >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 6 MONTH), '%Y-%m-%d')
                GROUP BY m ORDER BY m""").fetchall()
         monthly_trend = [{"month": r["m"], "count": r["c"]} for r in trend_rows]
         # 报告数 TOP5 单位

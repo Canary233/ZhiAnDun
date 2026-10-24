@@ -1,9 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-智安鉴 · 数据访问层
-===================
-基于 Python 内置 sqlite3 的轻量数据层，无第三方 ORM 依赖。
-所有模块通过 get_db() 获取连接；首次启动自动建表。
+智安鉴 · 数据访问层（MySQL）
+===========================
+基于 PyMySQL 的轻量数据层，无 ORM 依赖。所有模块通过 get_db() 获取连接，
+首次启动自动建库建表（幂等）。
+
+连接参数由环境变量提供（docker compose 中已配置）：
+  ZS_DB_HOST      默认 127.0.0.1
+  ZS_DB_PORT      默认 3306
+  ZS_DB_USER      默认 root
+  ZS_DB_PASSWORD  默认 空
+  ZS_DB_NAME      默认 zhianjian
 
 表结构：
   tags            单位标签
@@ -14,32 +21,166 @@
   reports         漏洞报告记录
   templates       报告 Word 模板（自定义）
   settings        KV 系统设置
+  scan_meta       扫描任务的归属信息（单位/系统）
   users           登录账号（管理员 / 普通用户）
 """
-import sqlite3
+import os
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime
 
-from config import DB_PATH
+import pymysql
+from pymysql.cursors import DictCursor
+
+DB_HOST = os.environ.get("ZS_DB_HOST", "127.0.0.1")
+DB_PORT = int(os.environ.get("ZS_DB_PORT", "3306") or 3306)
+DB_USER = os.environ.get("ZS_DB_USER", "root")
+DB_PASSWORD = os.environ.get("ZS_DB_PASSWORD", "")
+DB_NAME = os.environ.get("ZS_DB_NAME", "zhianjian")
 
 _local = threading.local()
 
 
+class DbRow(dict):
+    """查询结果行：支持 row["列名"]，也兼容旧代码里的 row[0]。"""
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+
+
+def _to_mysql(sql):
+    """把 SQLite 风格 SQL 转成 MySQL 风格（占位符与少数语法糖）。"""
+    text = sql.strip()
+    upper = text.upper()
+    if upper.startswith("INSERT OR IGNORE"):
+        text = "INSERT IGNORE" + text[len("INSERT OR IGNORE"):]
+    elif upper.startswith("INSERT OR REPLACE"):
+        text = "REPLACE" + text[len("INSERT OR REPLACE"):]
+    return text.replace("?", "%s")
+
+
+def _split_statements(script):
+    return [part.strip() for part in script.split(";") if part.strip()]
+
+
+class DbCursor:
+    """游标包装：统一占位符、Row 类型与 lastrowid 行为。"""
+
+    def __init__(self, cur):
+        self._cur = cur
+
+    def execute(self, sql, params=None):
+        if params is None:
+            self._cur.execute(_to_mysql(sql))
+        else:
+            self._cur.execute(_to_mysql(sql), params)
+        return self
+
+    def executemany(self, sql, seq_params):
+        self._cur.executemany(_to_mysql(sql), seq_params)
+        return self
+
+    def fetchone(self):
+        row = self._cur.fetchone()
+        return DbRow(row) if row is not None else None
+
+    def fetchall(self):
+        return [DbRow(r) for r in self._cur.fetchall()]
+
+    @property
+    def lastrowid(self):
+        return self._cur.lastrowid
+
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
+    def close(self):
+        self._cur.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+class DbConnection:
+    """连接包装：自动重连 + 支持 executescript（多条语句）。"""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def cursor(self):
+        self._conn.ping(reconnect=True)
+        return DbCursor(self._conn.cursor())
+
+    def execute(self, sql, params=()):
+        return self.cursor().execute(sql, params)
+
+    def executescript(self, script):
+        cur = self.cursor()
+        for stmt in _split_statements(script):
+            cur.execute(stmt)
+        cur.close()
+
+    def commit(self):
+        # 连接为 autocommit，保留该方法兼容旧调用
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
+
+
+def _connect(with_db=True):
+    return pymysql.connect(
+        host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD,
+        database=DB_NAME if with_db else None,
+        charset="utf8mb4", cursorclass=DictCursor,
+        autocommit=True, connect_timeout=10,
+    )
+
+
+def _ensure_database():
+    """首次启动自动建库（compose 里也会通过 MYSQL_DATABASE 创建）。"""
+    conn = _connect(with_db=False)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` "
+            "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+        cur.close()
+    finally:
+        conn.close()
+
+
 def get_db():
-    """获取当前线程的数据库连接"""
+    """获取当前线程的数据库连接（断线自动重连）。"""
     conn = getattr(_local, "conn", None)
     if conn is None:
-        conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
+        last_err = None
+        for _ in range(10):
+            try:
+                conn = DbConnection(_connect())
+                break
+            except Exception as e:  # 容器启动时数据库可能还没就绪
+                last_err = e
+                time.sleep(2)
+        if conn is None:
+            raise RuntimeError(f"无法连接 MySQL：{last_err}")
         _local.conn = conn
     return conn
 
 
 @contextmanager
 def db_cursor():
-    """事务化游标上下文"""
+    """事务化游标上下文（连接为 autocommit，保留接口兼容）"""
     conn = get_db()
     cur = conn.cursor()
     try:
@@ -58,130 +199,132 @@ def now_str():
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tags (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT DEFAULT '',
-    created_at TEXT DEFAULT ''
-);
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(191) NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT (''),
+    created_at VARCHAR(19) NOT NULL DEFAULT ''
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS units (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    enterprise_name TEXT NOT NULL,
-    business_status TEXT DEFAULT '',
-    legal_representative TEXT DEFAULT '',
-    registered_capital TEXT DEFAULT '',
-    paid_in_capital TEXT DEFAULT '',
-    province TEXT DEFAULT '',
-    city TEXT DEFAULT '',
-    district TEXT DEFAULT '',
-    credit_code TEXT DEFAULT '',
-    industry TEXT DEFAULT '',
-    former_names TEXT DEFAULT '',
-    registered_address TEXT DEFAULT '',
-    filing_status TEXT DEFAULT 'unknown',
-    icp_total INTEGER DEFAULT -1,
-    domain_count INTEGER DEFAULT -1,
-    created_at TEXT DEFAULT '',
-    updated_at TEXT DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_units_name ON units(enterprise_name);
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    enterprise_name VARCHAR(255) NOT NULL,
+    business_status VARCHAR(64) NOT NULL DEFAULT '',
+    legal_representative VARCHAR(64) NOT NULL DEFAULT '',
+    registered_capital VARCHAR(64) NOT NULL DEFAULT '',
+    paid_in_capital VARCHAR(64) NOT NULL DEFAULT '',
+    province VARCHAR(64) NOT NULL DEFAULT '',
+    city VARCHAR(64) NOT NULL DEFAULT '',
+    district VARCHAR(64) NOT NULL DEFAULT '',
+    credit_code VARCHAR(64) NOT NULL DEFAULT '',
+    industry VARCHAR(128) NOT NULL DEFAULT '',
+    former_names VARCHAR(500) NOT NULL DEFAULT '',
+    registered_address VARCHAR(500) NOT NULL DEFAULT '',
+    filing_status VARCHAR(32) NOT NULL DEFAULT 'unknown',
+    icp_total INT NOT NULL DEFAULT -1,
+    domain_count INT NOT NULL DEFAULT -1,
+    created_at VARCHAR(19) NOT NULL DEFAULT '',
+    updated_at VARCHAR(19) NOT NULL DEFAULT '',
+    INDEX idx_units_name (enterprise_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS unit_tags (
-    unit_id INTEGER NOT NULL,
-    tag_id INTEGER NOT NULL,
+    unit_id INT NOT NULL,
+    tag_id INT NOT NULL,
     PRIMARY KEY (unit_id, tag_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS domains (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    unit_name TEXT DEFAULT '',
-    domain TEXT NOT NULL,
-    main_licence TEXT DEFAULT '',
-    service_licence TEXT DEFAULT '',
-    nature_name TEXT DEFAULT '',
-    content_type_name TEXT DEFAULT '',
-    limit_access TEXT DEFAULT '',
-    update_record_time TEXT DEFAULT '',
-    is_deleted INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_domains_domain ON domains(domain);
-CREATE INDEX IF NOT EXISTS idx_domains_unit ON domains(unit_name);
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    unit_name VARCHAR(255) NOT NULL DEFAULT '',
+    domain VARCHAR(255) NOT NULL,
+    main_licence VARCHAR(128) NOT NULL DEFAULT '',
+    service_licence VARCHAR(128) NOT NULL DEFAULT '',
+    nature_name VARCHAR(64) NOT NULL DEFAULT '',
+    content_type_name VARCHAR(128) NOT NULL DEFAULT '',
+    limit_access VARCHAR(64) NOT NULL DEFAULT '',
+    update_record_time VARCHAR(19) NOT NULL DEFAULT '',
+    is_deleted TINYINT NOT NULL DEFAULT 0,
+    created_at VARCHAR(19) NOT NULL DEFAULT '',
+    INDEX idx_domains_domain (domain),
+    INDEX idx_domains_unit (unit_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS vulnerabilities (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    description TEXT DEFAULT '',
-    harm TEXT DEFAULT '',
-    suggestion TEXT DEFAULT '',
-    severity TEXT DEFAULT 'unknown',
-    created_at TEXT DEFAULT '',
-    updated_at TEXT DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_vuln_name ON vulnerabilities(name);
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(500) NOT NULL,
+    name_en VARCHAR(500) NOT NULL DEFAULT '',
+    description MEDIUMTEXT NOT NULL DEFAULT (''),
+    harm MEDIUMTEXT NOT NULL DEFAULT (''),
+    suggestion MEDIUMTEXT NOT NULL DEFAULT (''),
+    severity VARCHAR(32) NOT NULL DEFAULT 'unknown',
+    created_at VARCHAR(19) NOT NULL DEFAULT '',
+    updated_at VARCHAR(19) NOT NULL DEFAULT '',
+    INDEX idx_vuln_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS reports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    record_id TEXT NOT NULL UNIQUE,
-    unit_name TEXT DEFAULT '',
-    vul_name TEXT DEFAULT '',
-    system_name TEXT DEFAULT '',
-    domain TEXT DEFAULT '',
-    address TEXT DEFAULT '',
-    description TEXT DEFAULT '',
-    severity TEXT DEFAULT 'unknown',
-    harm TEXT DEFAULT '',
-    detail TEXT DEFAULT '',
-    suggestion TEXT DEFAULT '',
-    prove TEXT DEFAULT '',
-    detail_images TEXT DEFAULT '',
-    prove_images TEXT DEFAULT '',
-    status INTEGER DEFAULT 0,
-    lifecycle TEXT DEFAULT 'open',
-    lifecycle_remark TEXT DEFAULT '',
-    lifecycle_at TEXT DEFAULT '',
-    created_at TEXT DEFAULT '',
-    updated_at TEXT DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_reports_unit ON reports(unit_name);
-CREATE INDEX IF NOT EXISTS idx_reports_vul ON reports(vul_name);
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    record_id VARCHAR(64) NOT NULL UNIQUE,
+    unit_name VARCHAR(255) NOT NULL DEFAULT '',
+    vul_name VARCHAR(500) NOT NULL DEFAULT '',
+    vul_name_en VARCHAR(500) NOT NULL DEFAULT '',
+    system_name VARCHAR(255) NOT NULL DEFAULT '',
+    domain VARCHAR(255) NOT NULL DEFAULT '',
+    address VARCHAR(1000) NOT NULL DEFAULT '',
+    description MEDIUMTEXT NOT NULL DEFAULT (''),
+    severity VARCHAR(32) NOT NULL DEFAULT 'unknown',
+    harm MEDIUMTEXT NOT NULL DEFAULT (''),
+    detail MEDIUMTEXT NOT NULL DEFAULT (''),
+    suggestion MEDIUMTEXT NOT NULL DEFAULT (''),
+    prove MEDIUMTEXT NOT NULL DEFAULT (''),
+    detail_images MEDIUMTEXT NOT NULL DEFAULT (''),
+    prove_images MEDIUMTEXT NOT NULL DEFAULT (''),
+    status TINYINT NOT NULL DEFAULT 0,
+    lifecycle VARCHAR(32) NOT NULL DEFAULT 'open',
+    lifecycle_remark VARCHAR(1000) NOT NULL DEFAULT '',
+    lifecycle_at VARCHAR(19) NOT NULL DEFAULT '',
+    created_at VARCHAR(19) NOT NULL DEFAULT '',
+    updated_at VARCHAR(19) NOT NULL DEFAULT '',
+    INDEX idx_reports_unit (unit_name),
+    INDEX idx_reports_vul (vul_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS templates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    filename TEXT NOT NULL,
-    is_default INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT ''
-);
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(191) NOT NULL UNIQUE,
+    filename VARCHAR(255) NOT NULL,
+    is_default TINYINT NOT NULL DEFAULT 0,
+    created_at VARCHAR(19) NOT NULL DEFAULT ''
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT DEFAULT ''
-);
+    `key` VARCHAR(191) PRIMARY KEY,
+    `value` MEDIUMTEXT NOT NULL DEFAULT ('')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 扫描任务归属信息（扫描引擎侧没有单位/系统字段，由智安鉴本地补存）
 CREATE TABLE IF NOT EXISTS scan_meta (
-    scan_id TEXT PRIMARY KEY,
-    target TEXT DEFAULT '',
-    unit_name TEXT DEFAULT '',
-    system_name TEXT DEFAULT '',
-    remark TEXT DEFAULT '',
-    created_at TEXT DEFAULT '',
-    updated_at TEXT DEFAULT ''
-);
+    scan_id VARCHAR(64) PRIMARY KEY,
+    target VARCHAR(500) NOT NULL DEFAULT '',
+    unit_name VARCHAR(255) NOT NULL DEFAULT '',
+    system_name VARCHAR(255) NOT NULL DEFAULT '',
+    remark VARCHAR(500) NOT NULL DEFAULT '',
+    created_at VARCHAR(19) NOT NULL DEFAULT '',
+    updated_at VARCHAR(19) NOT NULL DEFAULT ''
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    display_name TEXT DEFAULT '',
-    role TEXT DEFAULT 'user',
-    is_active INTEGER DEFAULT 1,
-    remark TEXT DEFAULT '',
-    created_at TEXT DEFAULT '',
-    updated_at TEXT DEFAULT '',
-    last_login_at TEXT DEFAULT ''
-);
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(64) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    display_name VARCHAR(191) NOT NULL DEFAULT '',
+    role VARCHAR(32) NOT NULL DEFAULT 'user',
+    is_active TINYINT NOT NULL DEFAULT 1,
+    remark VARCHAR(500) NOT NULL DEFAULT '',
+    created_at VARCHAR(19) NOT NULL DEFAULT '',
+    updated_at VARCHAR(19) NOT NULL DEFAULT '',
+    last_login_at VARCHAR(19) NOT NULL DEFAULT ''
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 """
 
 # 首次启动自动创建的内置管理员（仅当 users 表为空时写入，之后完全由「用户管理」维护）
@@ -189,30 +332,33 @@ DEFAULT_ADMIN_USER = "admin"
 DEFAULT_ADMIN_PASSWORD = "admin123456"
 
 
+def _table_columns(conn, table):
+    rows = conn.cursor().execute(
+        "SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?", (table,)).fetchall()
+    return {r["name"] for r in rows}
+
+
 def init_db():
-    """初始化数据库（幂等）"""
+    """初始化数据库（幂等）：建库、建表、补齐历史版本新增列。"""
+    _ensure_database()
     conn = get_db()
     conn.executescript(SCHEMA)
-    # 旧库增量迁移：reports 增加独立图片字段（检测过程图片 / 归属证明图片，JSON 数组）
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(reports)").fetchall()}
-    if "detail_images" not in cols:
-        conn.execute("ALTER TABLE reports ADD COLUMN detail_images TEXT DEFAULT ''")
-    if "prove_images" not in cols:
-        conn.execute("ALTER TABLE reports ADD COLUMN prove_images TEXT DEFAULT ''")
-    # 漏洞处置全生命周期：open 待整改 / fixing 整改中 / fixed 已修复待复测 / verified 复测通过
-    if "lifecycle" not in cols:
-        conn.execute("ALTER TABLE reports ADD COLUMN lifecycle TEXT DEFAULT 'open'")
-    if "lifecycle_remark" not in cols:
-        conn.execute("ALTER TABLE reports ADD COLUMN lifecycle_remark TEXT DEFAULT ''")
-    if "lifecycle_at" not in cols:
-        conn.execute("ALTER TABLE reports ADD COLUMN lifecycle_at TEXT DEFAULT ''")
-    # 报告漏洞名中文化后保留英文原名，便于追溯与回退
-    if "vul_name_en" not in cols:
-        conn.execute("ALTER TABLE reports ADD COLUMN vul_name_en TEXT DEFAULT ''")
-    # 漏洞名称中文化：记录英文原名（name_en），便于与扫描结果/模板匹配、避免重复入库
-    vcols = {r["name"] for r in conn.execute("PRAGMA table_info(vulnerabilities)").fetchall()}
-    if "name_en" not in vcols:
-        conn.execute("ALTER TABLE vulnerabilities ADD COLUMN name_en TEXT DEFAULT ''")
+    # 老库增量迁移：补齐历史上逐步新增的列（新库建表时已包含，自动跳过）
+    cols = _table_columns(conn, "reports")
+    report_columns = (
+        ("detail_images", "MEDIUMTEXT NOT NULL DEFAULT ('')"),
+        ("prove_images", "MEDIUMTEXT NOT NULL DEFAULT ('')"),
+        ("lifecycle", "VARCHAR(32) NOT NULL DEFAULT 'open'"),
+        ("lifecycle_remark", "VARCHAR(1000) NOT NULL DEFAULT ''"),
+        ("lifecycle_at", "VARCHAR(19) NOT NULL DEFAULT ''"),
+        ("vul_name_en", "VARCHAR(500) NOT NULL DEFAULT ''"),
+    )
+    for name, ddl in report_columns:
+        if name not in cols:
+            conn.execute(f"ALTER TABLE reports ADD COLUMN {name} {ddl}")
+    if "name_en" not in _table_columns(conn, "vulnerabilities"):
+        conn.execute("ALTER TABLE vulnerabilities ADD COLUMN name_en VARCHAR(500) NOT NULL DEFAULT ''")
     conn.commit()
 
 
@@ -377,15 +523,15 @@ def clear_all_data():
 # ---------------- 设置 KV ----------------
 def get_setting(key, default=""):
     cur = get_db().cursor()
-    row = cur.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    row = cur.execute("SELECT `value` FROM settings WHERE `key`=?", (key,)).fetchone()
     cur.close()
     return row["value"] if row else default
 
 
 def set_setting(key, value):
     cur = get_db().cursor()
-    cur.execute("INSERT INTO settings(key,value) VALUES(?,?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
+    cur.execute("INSERT INTO settings(`key`,`value`) VALUES(?,?) "
+                "ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", (key, str(value)))
     get_db().commit()
     cur.close()
 
@@ -395,7 +541,7 @@ def paginate(query_sql, params, page, limit):
     """通用分页：返回 (rows, total)"""
     conn = get_db()
     cur = conn.cursor()
-    total = cur.execute(f"SELECT COUNT(*) FROM ({query_sql})", params).fetchone()[0]
+    total = cur.execute(f"SELECT COUNT(*) FROM ({query_sql}) AS _t", params).fetchone()[0]
     offset = (page - 1) * limit
     rows = cur.execute(query_sql + f" LIMIT {limit} OFFSET {offset}", params).fetchall()
     cur.close()

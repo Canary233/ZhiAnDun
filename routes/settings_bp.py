@@ -334,8 +334,8 @@ def stats():
     n_vulns = cur.execute("SELECT COUNT(*) FROM vulnerabilities").fetchone()[0]
     n_reports = cur.execute("SELECT COUNT(*) FROM reports WHERE status=0").fetchone()[0]
     n_templates = cur.execute("SELECT COUNT(*) FROM templates").fetchone()[0]
-    severity = dict(cur.execute(
-        "SELECT severity, COUNT(*) FROM reports WHERE status=0 GROUP BY severity").fetchall())
+    severity = {r["severity"]: r["c"] for r in cur.execute(
+        "SELECT severity, COUNT(*) AS c FROM reports WHERE status=0 GROUP BY severity").fetchall()}
     cur.close()
     return jsonify(code=0, data={
         "units": n_units, "domains": n_domains, "vulns": n_vulns,
