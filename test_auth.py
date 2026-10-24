@@ -62,7 +62,7 @@ check("未登录访问接口返回 401 + need_login", st == 401 and j.get("need_
       f"{st} {j.get('msg')}")
 st, _ = get(anon, "/login", allow_redirects=False)
 check("登录页可匿名访问", st == 200, str(st))
-st, _ = get(anon, "/static/js/app.js")
+st, _ = get(anon, "/static/app/index.html")
 check("静态资源免登录", st == 200, str(st))
 st, j = post(anon, "/api/units/add", {"enterprise_name": "未登录注入测试"})
 check("未登录不能调用业务写接口", st == 401, str(st))

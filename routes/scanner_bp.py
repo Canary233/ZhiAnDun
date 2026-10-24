@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """扫描器结果文件智能解析路由 + 内置漏洞扫描引擎联动路由"""
-from flask import Blueprint, request, jsonify, render_template
+from flask import Blueprint, request, jsonify
 
+import database as db
 from core import scanners, shelling_client
+from core.helpers import now_display
 
 bp = Blueprint("scanner", __name__)
 
@@ -28,6 +30,42 @@ _PHASE_CN = {"recon": "信息收集", "vuln": "漏洞发现",
 
 # 攻击链可能性 / 影响程度中文名
 _LEVEL_CN = {"critical": "严重", "high": "高", "medium": "中", "low": "低"}
+
+
+# ---------------- 扫描任务归属信息（单位 / 系统） ----------------
+# 扫描引擎侧的任务模型只有 target/remark，没有「所属单位/系统」；
+# 这里在智安鉴本地补存一份，供「最近扫描」展示与「加入报告管理」时回填。
+def _save_scan_meta(scan_id, target=None, unit_name=None, system_name=None, remark=None):
+    """写入/更新扫描任务归属信息；传 None 的字段保持不变（幂等）。"""
+    if not scan_id:
+        return
+    sid = str(scan_id)
+    now = now_display()
+    db.execute("INSERT OR IGNORE INTO scan_meta(scan_id, created_at, updated_at) VALUES(?,?,?)",
+               (sid, now, now))
+    sets, params = [], []
+    for field, value in (("target", target), ("unit_name", unit_name),
+                         ("system_name", system_name), ("remark", remark)):
+        if value is not None:
+            sets.append(f"{field}=?")
+            params.append(value)
+    if not sets:
+        return
+    params.extend([now, sid])
+    db.execute(f"UPDATE scan_meta SET {','.join(sets)}, updated_at=? WHERE scan_id=?", tuple(params))
+
+
+def _scan_meta_map(scan_ids):
+    """批量取扫描任务的归属信息：{scan_id: {unit_name, system_name}}"""
+    ids = [str(x) for x in scan_ids if x]
+    if not ids:
+        return {}
+    rows = db.query_all(
+        "SELECT scan_id, unit_name, system_name FROM scan_meta WHERE scan_id IN (%s)"
+        % ",".join("?" * len(ids)), ids)
+    return {r["scan_id"]: {"unit_name": r["unit_name"] or "",
+                           "system_name": r["system_name"] or ""} for r in rows}
+
 
 
 @bp.post("/api/scanner/parse")
@@ -59,12 +97,6 @@ def parse_file():
 
 
 # ==================== 内置漏洞扫描引擎联动 ====================
-@bp.get("/scanner")
-def scanner_page():
-    """AI 漏洞扫描：调用内置扫描引擎发起扫描、看进度、回收结果"""
-    return render_template("scanner.html")
-
-
 @bp.get("/api/scanner/shelling/options")
 def shelling_options():
     """返回可选扫描类型，供前端下拉框渲染"""
@@ -84,20 +116,43 @@ def shelling_start():
     if scan_type not in SCAN_TYPES:
         scan_type = "full"
     remark = (data.get("remark") or "").strip() or "智安鉴发起"
+    unit_name = (data.get("unit_name") or "").strip()
+    system_name = (data.get("system_name") or "").strip()
+    if len(unit_name) > 200 or len(system_name) > 200:
+        return jsonify(code=1, msg="单位名称/系统名称过长（最多 200 字）"), 400
     config = data.get("config") if isinstance(data.get("config"), dict) else None
     try:
         task = shelling_client.get_client().create_scan(
             target, scan_type=scan_type, remark=remark, config=config)
     except shelling_client.ShellingError as e:
         return jsonify(code=1, msg=str(e)), 502
+    scan_id = task.get("id")
+    # 记下归属单位/系统，后续「加入报告管理」直接回填，不用重复录入
+    _save_scan_meta(scan_id, target=target, unit_name=unit_name,
+                    system_name=system_name, remark=remark)
     return jsonify(code=0, msg="扫描任务已提交", data={
-        "scan_id": task.get("id"),
+        "scan_id": scan_id,
         "target": task.get("target") or target,
         "scan_type": task.get("scan_type") or scan_type,
         "scan_type_cn": SCAN_TYPE_CN.get(task.get("scan_type") or scan_type, ""),
         "status": task.get("status"),
         "status_cn": shelling_client.status_cn(task.get("status")),
+        "unit_name": unit_name,
+        "system_name": system_name,
     })
+
+
+@bp.post("/api/scanner/shelling/meta/<scan_id>")
+def shelling_save_meta(scan_id):
+    """补充/修改某次扫描的所属单位与系统（扫描时没填，可在加入报告时补录）"""
+    data = request.get_json(silent=True) or {}
+    unit_name = (data.get("unit_name") or "").strip()
+    system_name = (data.get("system_name") or "").strip()
+    if len(unit_name) > 200 or len(system_name) > 200:
+        return jsonify(code=1, msg="单位名称/系统名称过长（最多 200 字）"), 400
+    _save_scan_meta(scan_id, unit_name=unit_name, system_name=system_name)
+    return jsonify(code=0, msg="已保存", data={
+        "scan_id": scan_id, "unit_name": unit_name, "system_name": system_name})
 
 
 @bp.get("/api/scanner/shelling/status/<scan_id>")
@@ -174,6 +229,7 @@ def shelling_result(scan_id):
         return jsonify(code=1, msg=str(e)), 502
     findings = shelling_client.to_findings(vulns, target=task.get("target") or "")
     stats = scanners.summarize_findings(findings)
+    meta = _scan_meta_map([scan_id]).get(str(scan_id)) or {}
     return jsonify(code=0, msg="已获取扫描结果", data={
         "scan_id": scan_id,
         "target": task.get("target") or "",
@@ -182,6 +238,8 @@ def shelling_result(scan_id):
         "status_cn": shelling_client.status_cn(task.get("status")),
         "llm_summary": task.get("llm_summary") or "",
         "llm_risk_score": task.get("llm_risk_score"),
+        "unit_name": meta.get("unit_name", ""),
+        "system_name": meta.get("system_name", ""),
         "count": len(findings),
         "severity_stats": stats,
         "severity_stats_cn": {_SEV_CN.get(k, k): v for k, v in stats.items()},
@@ -285,6 +343,12 @@ def shelling_scans():
             "llm_risk_score": it.get("llm_risk_score"),
             "remark": it.get("remark") or "",
         })
+    # 补上本地记录的归属单位/系统，供列表展示与「加入报告」回填
+    meta = _scan_meta_map([it["scan_id"] for it in items])
+    for it in items:
+        m = meta.get(it["scan_id"]) or {}
+        it["unit_name"] = m.get("unit_name", "")
+        it["system_name"] = m.get("system_name", "")
     return jsonify(code=0, data={"total": data.get("total") or 0, "items": items,
                                  "page": page, "page_size": page_size})
 
@@ -317,6 +381,8 @@ def shelling_delete(scan_id):
             client.delete_scan(scan_id)
         except shelling_client.ShellingError as e2:
             return jsonify(code=1, msg=str(e2)), 502
+    # 引擎任务删除后，本地归属记录一并清掉，避免残留
+    db.execute("DELETE FROM scan_meta WHERE scan_id=?", (str(scan_id),))
     return jsonify(code=0, msg="扫描任务已删除")
 
 

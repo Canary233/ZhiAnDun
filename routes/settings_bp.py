@@ -3,18 +3,13 @@
 import os
 import uuid
 
-from flask import Blueprint, request, jsonify, render_template, send_file
+from flask import Blueprint, request, jsonify, send_file
 
 import database as db
 from config import get_cfg, save_config, BG_DIR, BASE_DIR
 from core.helpers import now_display, content_disposition
 
 bp = Blueprint("settings", __name__)
-
-
-@bp.get("/settings")
-def page():
-    return render_template("settings.html")
 
 
 # ---------------- 外观设置 ----------------

@@ -159,6 +159,17 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT DEFAULT ''
 );
 
+-- 扫描任务归属信息（扫描引擎侧没有单位/系统字段，由智安鉴本地补存）
+CREATE TABLE IF NOT EXISTS scan_meta (
+    scan_id TEXT PRIMARY KEY,
+    target TEXT DEFAULT '',
+    unit_name TEXT DEFAULT '',
+    system_name TEXT DEFAULT '',
+    remark TEXT DEFAULT '',
+    created_at TEXT DEFAULT '',
+    updated_at TEXT DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
@@ -195,6 +206,13 @@ def init_db():
         conn.execute("ALTER TABLE reports ADD COLUMN lifecycle_remark TEXT DEFAULT ''")
     if "lifecycle_at" not in cols:
         conn.execute("ALTER TABLE reports ADD COLUMN lifecycle_at TEXT DEFAULT ''")
+    # 报告漏洞名中文化后保留英文原名，便于追溯与回退
+    if "vul_name_en" not in cols:
+        conn.execute("ALTER TABLE reports ADD COLUMN vul_name_en TEXT DEFAULT ''")
+    # 漏洞名称中文化：记录英文原名（name_en），便于与扫描结果/模板匹配、避免重复入库
+    vcols = {r["name"] for r in conn.execute("PRAGMA table_info(vulnerabilities)").fetchall()}
+    if "name_en" not in vcols:
+        conn.execute("ALTER TABLE vulnerabilities ADD COLUMN name_en TEXT DEFAULT ''")
     conn.commit()
 
 

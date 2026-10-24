@@ -7,3 +7,5 @@ __pycache__/
 config.json
 data/
 scan-engine/
+frontend/node_modules/
+frontend/dist/

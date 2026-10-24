@@ -3,17 +3,12 @@
 import json
 from datetime import datetime
 
-from flask import Blueprint, request, jsonify, render_template
+from flask import Blueprint, request, jsonify
 
 import database as db
 from core.helpers import now_display
 
 bp = Blueprint("domains", __name__)
-
-
-@bp.get("/domains")
-def page():
-    return render_template("domains.html")
 
 
 @bp.get("/api/domains")

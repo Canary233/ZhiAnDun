@@ -8,7 +8,7 @@
      或使用表单填写的域名 → 域名库不存在则自动新增并归属到该单位；
   3. 回写单位的域名数量（domain_count）。
 
-extract_host() 的前端等价实现为 static/js/app.js 中的 ZhiShield.extractHost，
+extract_host() 的前端等价实现为 frontend/src/lib/format.ts 中的 extractHost()，
 两者口径保持一致（去协议、去用户信息、去端口、去路径、域名小写）。
 """
 import re

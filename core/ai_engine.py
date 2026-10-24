@@ -444,6 +444,35 @@ class AIReportAnalyzer:
         data = extract_json(content)
         return data if isinstance(data, dict) else {"root_cause": content}
 
+    # ---------------- AI 漏洞信息中文化 ----------------
+    def translate_segments(self, segments):
+        """把若干英文段落翻译成中文，返回等长列表（供漏洞库/报告的中文化使用）。
+
+        按段落而不是按整字段翻译：扫描引擎会把中文的「AI 分析/整改建议」拼在英文正文后面，
+        只翻英文段落、原样保留已有中文，避免整段重写导致中文内容丢失。
+        """
+        items = [str(x) for x in segments if str(x).strip()]
+        if not items:
+            return []
+        listing = "\n".join(f"{i + 1}. {x}" for i, x in enumerate(items))
+        prompt = (
+            "你是网络安全报告翻译专家。请把下面每个英文段落翻译成简体中文，用于中文漏洞报告。\n"
+            "要求：\n"
+            "1) 术语按国内安全行业惯例（Authentication Bypass=认证绕过、RCE=远程代码执行、"
+            "Path Traversal=路径穿越、SSRF=服务端请求伪造 等）；\n"
+            "2) 产品名、版本号、CVE 编号、URL、参数名保持原样，不要翻译；\n"
+            "3) 不增删技术细节，不输出解释或思考过程；\n"
+            "4) 段落数量必须与输入一致、顺序一一对应。\n\n"
+            f"待翻译段落：\n{listing}\n\n"
+            '只输出 JSON：{"translations": ["译文1", "译文2", ...]}'
+        )
+        content = self.llm.chat([{"role": "user", "content": prompt}], temperature=0.1, max_tokens=4096)
+        data = extract_json(content)
+        result = data.get("translations") if isinstance(data, dict) else None
+        if not isinstance(result, list):
+            return []
+        return [str(x).strip() for x in result]
+
     # ---------------- AI 报告评分点评 ----------------
     def grade_report(self, report: dict, rule_issues: list):
         prompt = (
@@ -542,6 +571,12 @@ def mock_summary(findings):
     return ("经检测共发现漏洞 {n} 个，其中高危及以上问题需优先整改。整体风险态势为中等偏上，"
             "建议重点修复注入类与未授权访问类漏洞，并加强访问控制与输入校验，"
             "同步开展安全加固复测。（演示数据）").format(n=len(findings))
+
+
+def mock_translate_segments(count: int):
+    """模拟模式的段落翻译（无 Key 联调用）：返回与输入等长的中文占位译文。"""
+    return [f"（模拟译文 {i + 1}）该漏洞可导致未授权访问或敏感信息泄露，建议升级到官方修复版本并加强访问控制。"
+            for i in range(max(0, int(count)))]
 
 
 def get_ai_engine(api_key, base_url, model, timeout=120):

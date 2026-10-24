@@ -5,7 +5,7 @@ import re
 from io import BytesIO
 
 import pandas as pd
-from flask import Blueprint, request, jsonify, render_template, send_file, Response
+from flask import Blueprint, request, jsonify, send_file, Response
 
 import database as db
 from core.helpers import content_disposition, now_display
@@ -29,17 +29,6 @@ def sync_from_reports():
                    msg=(f"已扫描 {r['scanned']} 条报告，新增单位 {r['units_created']} 个、"
                         f"域名 {r['domains_created']} 个（已存在的不会重复添加）"),
                    data=r)
-
-
-# ---------------- 页面 ----------------
-@bp.get("/units")
-def index():
-    return render_template("units.html")
-
-
-@bp.get("/tags")
-def tags_page():
-    return render_template("tags.html")
 
 
 # ---------------- 单位列表 ----------------

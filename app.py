@@ -19,7 +19,7 @@ import sqlite3
 from datetime import timedelta
 from urllib.parse import quote
 
-from flask import (Flask, render_template, jsonify, request, session,
+from flask import (Flask, jsonify, request, session,
                    send_from_directory, abort, redirect)
 
 import database as db
@@ -71,9 +71,47 @@ def create_app():
     app.register_blueprint(scanner_bp)
     app.register_blueprint(users_bp)
 
+    # ---------------- 前端（React SPA） ----------------
+    # 构建产物在 static/app/（frontend/ 目录 npm run build 生成）。
+    # 所有页面路径统一返回 SPA 外壳，由前端路由渲染；/api、/static、/uploads、/media 仍走 Flask。
+    SPA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "app")
+    SPA_INDEX = os.path.join(SPA_DIR, "index.html")
+
+    @app.before_request
+    def serve_spa():
+        if request.method != "GET":
+            return None
+        path = request.path
+        if path.startswith(("/api/", "/static/", "/uploads/", "/media/")) or path == "/favicon.ico":
+            return None
+        if not os.path.exists(SPA_INDEX):
+            return (
+                "<!doctype html><meta charset='utf-8'><title>前端未构建</title>"
+                "<div style='font:14px/1.8 system-ui;padding:48px;max-width:640px;margin:0 auto'>"
+                "<h2>前端资源未构建</h2>"
+                "<p>请在 <code>frontend/</code> 目录执行：</p>"
+                "<pre style='background:#f6f7f9;padding:12px;border-radius:6px'>npm install\nnpm run build</pre>"
+                "<p>构建完成后刷新本页。</p>"
+                "</div>",
+                503,
+                {"Content-Type": "text/html; charset=utf-8"},
+            )
+        # 页面级访问控制仍由服务端兜底（接口侧另有一层），前端路由再按角色兜一层：
+        # 未登录整页跳登录页，管理员专属页面直接回 403（页面内也会渲染无权限提示）
+        user = auth.current_user()
+        if path == "/login":
+            if user:
+                return redirect("/")
+        elif not user:
+            return redirect("/login?next=" + quote(path, safe="/"))
+        resp = send_from_directory(SPA_DIR, "index.html")
+        if path == "/users" and user and user["role"] != "admin":
+            resp.status_code = 403
+        return resp
+
     # ---------------- 登录校验 ----------------
-    # 免登录：登录页本身、登录接口、CSRF 取号接口、静态资源
-    PUBLIC_PATHS = {"/login", "/api/auth/login", "/api/csrf", "/favicon.ico"}
+    # 免登录：登录页本身、登录接口、CSRF 取号接口、前端启动配置、静态资源
+    PUBLIC_PATHS = {"/login", "/api/auth/login", "/api/csrf", "/api/app/bootstrap", "/favicon.ico"}
     PUBLIC_PREFIXES = ("/static/",)
     # 仅管理员：用户管理页面与接口
     ADMIN_PATHS = ("/users", "/api/users")
@@ -88,11 +126,8 @@ def create_app():
             if path.startswith("/api/"):
                 return jsonify(code=1, msg="登录已失效，请重新登录", need_login=True), 401
             return redirect("/login?next=" + quote(path, safe="/"))
-        if path == ADMIN_PATHS[0] or path.startswith(ADMIN_PATHS[1]):
-            if user["role"] != "admin":
-                if path.startswith("/api/"):
-                    return jsonify(code=1, msg="需要管理员权限"), 403
-                return render_template("error.html", code=403, msg="需要管理员权限"), 403
+        if path.startswith(ADMIN_PATHS[1]) and user["role"] != "admin":
+            return jsonify(code=1, msg="需要管理员权限"), 403
         return None
 
     # ---------------- 轻量 CSRF 防护 ----------------
@@ -119,11 +154,35 @@ def create_app():
             session["_csrf"] = secrets.token_hex(16)
         return jsonify(code=0, token=session["_csrf"])
 
-    # ---------------- 仪表盘 ----------------
-    @app.get("/")
-    def index():
-        return render_template("index.html")
+    # ---------------- 前端启动配置 ----------------
+    @app.get("/api/app/bootstrap")
+    def app_bootstrap():
+        """SPA 首屏配置：品牌信息、主题、背景与当前登录用户（未登录时 user=None）。"""
+        cfg = get_cfg()
+        user = auth.current_user()
+        default_pwd = bool(session.get("default_pwd"))
+        return jsonify(code=0, data={
+            "app_name": "智安鉴",
+            "app_title": cfg.get("app_title", "智能安全检测与漏洞报告系统"),
+            "app_subtitle": cfg.get("app_subtitle", ""),
+            "app_version": VERSION,
+            "theme_color": cfg.get("theme_color", "#2563eb"),
+            "background": cfg.get("background", ""),
+            "background_overlay": cfg.get("background_overlay", 0.35),
+            "background_blur": cfg.get("background_blur", 0),
+            "default_pwd": default_pwd,
+            "user": {
+                "id": user["id"],
+                "username": user["username"],
+                "display_name": user["display_name"],
+                "role": user["role"],
+                "role_cn": "管理员" if user["role"] == "admin" else "普通用户",
+                "last_login_at": user["last_login_at"],
+                "default_pwd": default_pwd,
+            } if user else None,
+        })
 
+    # ---------------- 仪表盘 ----------------
     @app.get("/api/dashboard")
     def dashboard():
         conn = db.get_db()
@@ -184,46 +243,18 @@ def create_app():
     def ai_images(filename):
         return send_from_directory(str(AI_IMAGE_DIR), filename)
 
-    # ---------------- 模板上下文 ----------------
-    def _active_nav(path: str) -> str:
-        """按请求路径推断侧栏应高亮的项（与 templates/base.html 里的判断一致）"""
-        path = path or "/"
-        if path == "/":
-            return "index"
-        if path.startswith("/tools/"):
-            return "tools-" + path.rstrip("/").rsplit("/", 1)[-1]
-        if path.startswith("/reports/ai"):
-            return "report_ai"
-        return path.strip("/").split("/")[0]
-
-    @app.context_processor
-    def inject_globals():
-        cfg = get_cfg()
-        return {
-            # 侧栏高亮：按当前路径推断（模板里用 active 变量）
-            "active": _active_nav(request.path),
-            # 当前登录用户（未登录为 None；模板里用 CURRENT_USER 控制入口与头像）
-            "CURRENT_USER": auth.current_user(),
-            "DEFAULT_PWD": bool(session.get("default_pwd")),
-            "APP_NAME": "智安鉴",
-            "APP_TITLE": cfg.get("app_title", "智能安全检测与漏洞报告系统"),
-            "APP_SUBTITLE": cfg.get("app_subtitle", ""),
-            "APP_VERSION": VERSION,
-            "THEME_COLOR": cfg.get("theme_color", "#2563eb"),
-            "BG_IMAGE": cfg.get("background", ""),
-            "BG_OVERLAY": cfg.get("background_overlay", 0.35),
-            "BG_BLUR": cfg.get("background_blur", 0),
-            "CSRF_TOKEN": session.get("_csrf", ""),
-        }
-
     # ---------------- 错误处理 ----------------
     @app.errorhandler(404)
     def not_found(e):
-        return render_template("error.html", code=404, msg="页面不存在"), 404
+        if request.path.startswith("/api/"):
+            return jsonify(code=1, msg="接口不存在"), 404
+        return "页面不存在", 404
 
     @app.errorhandler(500)
     def server_error(e):
-        return render_template("error.html", code=500, msg="服务器内部错误"), 500
+        if request.path.startswith("/api/"):
+            return jsonify(code=1, msg="服务器内部错误"), 500
+        return "服务器内部错误", 500
 
     @app.errorhandler(413)
     def too_large(e):

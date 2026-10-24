@@ -1,40 +1,10 @@
 # -*- coding: utf-8 -*-
 """工具管理路由"""
-from flask import Blueprint, request, jsonify, render_template
+from flask import Blueprint, request, jsonify
 
 from core import tools as T
 
 bp = Blueprint("tools", __name__)
-
-
-@bp.get("/tools/password")
-def password_page():
-    return render_template("tools/password.html")
-
-
-@bp.get("/tools/dedup")
-def dedup_page():
-    return render_template("tools/dedup.html")
-
-
-@bp.get("/tools/urls")
-def urls_page():
-    return render_template("tools/urls.html")
-
-
-@bp.get("/tools/compare")
-def compare_page():
-    return render_template("tools/compare.html")
-
-
-@bp.get("/tools/classify")
-def classify_page():
-    return render_template("tools/classify.html")
-
-
-@bp.get("/tools/cvss")
-def cvss_page():
-    return render_template("tools/cvss.html")
 
 
 # ---------------- API ----------------

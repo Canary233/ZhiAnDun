@@ -8,7 +8,7 @@ import logging
 
 import json as _json
 
-from flask import Blueprint, request, jsonify, Response, stream_with_context, render_template
+from flask import Blueprint, request, jsonify, Response, stream_with_context
 
 import database as db
 from config import get_cfg, AI_IMAGE_DIR
@@ -79,11 +79,6 @@ def _ai_request(data, mode):
     base_url = base_url.rstrip("/")
     engine = get_ai_engine(api_key, base_url, model, timeout)
     return engine, api_key, None, None
-
-
-@bp.get("/assistant")
-def assistant_page():
-    return render_template("assistant.html")
 
 
 @bp.get("/api/ai/config")

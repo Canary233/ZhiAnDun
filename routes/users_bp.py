@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """登录 / 退出 / 修改密码 / 用户管理 路由"""
-from flask import Blueprint, jsonify, redirect, render_template, request, session
+from flask import Blueprint, jsonify, request, session
 
 import database as db
 from core import auth
@@ -13,19 +13,6 @@ def _deny_admin():
     if auth.is_admin():
         return None
     return jsonify(code=1, msg="需要管理员权限"), 403
-
-
-# ==================== 页面 ====================
-@bp.get("/login")
-def login_page():
-    if auth.current_user():
-        return redirect("/")
-    return render_template("login.html")
-
-
-@bp.get("/users")
-def users_page():
-    return render_template("users.html")
 
 
 # ==================== 登录 / 退出 ====================

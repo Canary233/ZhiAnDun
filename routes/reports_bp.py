@@ -4,29 +4,20 @@ import os
 import json as _json
 import uuid
 
-from flask import Blueprint, request, jsonify, render_template, send_file, Response
+from flask import Blueprint, request, jsonify, send_file, Response
 
 import database as db
 from config import TEMPLATE_DIR, EXPORT_DIR, UPLOAD_DIR
 from core import exporter
-from core.asset_sync import sync_unit_and_domain
+from core.asset_sync import sync_unit_and_domain, extract_host
 from core.tpl_bootstrap import extract_placeholders
 from core import tpl_extract
+from core.vuln_translate import to_chinese
 from core.helpers import (sanitize_filename, now_display, now_ts, gen_record_id,
                           content_disposition, severity_cn, lifecycle_cn, lifecycle_can_move,
                           LIFECYCLE_ACTION, LIFECYCLE_CN)
 
 bp = Blueprint("reports", __name__)
-
-
-@bp.get("/reports")
-def page():
-    return render_template("reports.html")
-
-
-@bp.get("/reports/ai")
-def ai_page():
-    return render_template("report_ai.html")
 
 
 # ---------------- 报告 CRUD ----------------
@@ -95,6 +86,68 @@ def _norm_img_list(v):
     return _json.dumps(uniq, ensure_ascii=False) if uniq else ""
 
 
+def _insert_report_record(unit_name, vul_name, system_name="", domain="", address="",
+                          description="", severity="unknown", harm="", detail="",
+                          suggestion="", prove="", detail_images="", prove_images=""):
+    """写入一条报告记录（单条新增与批量加入共用同一套字段口径）。"""
+    return db.execute(
+        """INSERT INTO reports(record_id, unit_name, vul_name, system_name, domain, address,
+           description, severity, harm, detail, suggestion, prove, detail_images, prove_images,
+           status, created_at, updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)""",
+        (gen_record_id(), unit_name, vul_name, system_name, domain, address,
+         description, severity, harm, detail, suggestion, prove,
+         detail_images, prove_images, now_display(), now_display()))
+
+
+def _sync_vuln_library(name, description="", harm="", suggestion="", severity="unknown"):
+    """漏洞知识库 get_or_create（已存在则不动，避免覆盖人工维护的内容）。
+
+    英文漏洞名（如扫描引擎输出的 Nuclei 模板名）自动翻译为中文入库，
+    英文原名记在 name_en 里：既保留可追溯性，也用于后续去重匹配。
+    """
+    name = (name or "").strip()
+    if not name:
+        return
+    zh = to_chinese(name)
+    row = db.query_one("SELECT id, IFNULL(name_en,'') AS name_en FROM vulnerabilities "
+                       "WHERE name=? OR name_en=?", (zh, name))
+    if row:
+        # 老数据补记英文原名（仅当还没有记录、且确实做过翻译）
+        if not row["name_en"].strip() and zh != name:
+            db.execute("UPDATE vulnerabilities SET name_en=? WHERE id=?", (name, row["id"]))
+        return
+    db.execute(
+        """INSERT INTO vulnerabilities(name, name_en, description, harm, suggestion, severity, created_at, updated_at)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        (zh, name if zh != name else "", description, harm, suggestion, severity,
+         now_display(), now_display()))
+
+
+_FINDING_SEVERITIES = {"critical", "high", "medium", "low", "info", "unknown"}
+
+
+def _normalize_finding(item):
+    """把一条「发现」统一成报告字段（兼容扫描引擎格式与已归一化格式）。"""
+    if not isinstance(item, dict):
+        return {"vul_name": ""}
+    src = item.get("data") if isinstance(item.get("data"), dict) else item
+    severity = str(src.get("severity") or "unknown").strip().lower()
+    if severity not in _FINDING_SEVERITIES:
+        severity = "unknown"
+    return {
+        "vul_name": str(src.get("vul_name") or src.get("title") or "").strip(),
+        "severity": severity,
+        "address": str(src.get("address") or src.get("url") or "").strip(),
+        "description": str(src.get("description") or "").strip(),
+        "detail": str(src.get("detail") or src.get("evidence") or "").strip(),
+        "harm": str(src.get("harm") or "").strip(),
+        "suggestion": str(src.get("suggestion") or "").strip(),
+        "prove": str(src.get("prove") or "").strip(),
+        "domain": str(src.get("domain") or "").strip(),
+    }
+
+
 @bp.post("/api/report/add")
 def report_add():
     data = request.get_json(silent=True) or {}
@@ -105,26 +158,18 @@ def report_add():
 
     # 同步写入漏洞库（若不存在）
     if data.get("sync_vuln", True) and vul_name:
-        existing = db.query_one("SELECT id FROM vulnerabilities WHERE name=?", (vul_name,))
-        if not existing:
-            db.execute(
-                """INSERT INTO vulnerabilities(name, description, harm, suggestion, severity, created_at, updated_at)
-                   VALUES(?,?,?,?,?,?,?)""",
-                (vul_name, data.get("description", ""), data.get("harm", ""),
-                 data.get("suggestion", ""), data.get("severity", "unknown"),
-                 now_display(), now_display()))
+        _sync_vuln_library(vul_name, data.get("description", ""), data.get("harm", ""),
+                           data.get("suggestion", ""), data.get("severity", "unknown"))
 
-    detail_images = _norm_img_list(data.get("detail_images"))
-    prove_images = _norm_img_list(data.get("prove_images"))
-    rid = db.execute(
-        """INSERT INTO reports(record_id, unit_name, vul_name, system_name, domain, address,
-           description, severity, harm, detail, suggestion, prove, detail_images, prove_images,
-           status, created_at, updated_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)""",
-        (gen_record_id(), unit_name, vul_name, data.get("system_name", ""), data.get("domain", ""),
-         data.get("address", ""), data.get("description", ""), data.get("severity", "unknown"),
-         data.get("harm", ""), data.get("detail", ""), data.get("suggestion", ""),
-         data.get("prove", ""), detail_images, prove_images, now_display(), now_display()))
+    rid = _insert_report_record(
+        unit_name=unit_name, vul_name=vul_name,
+        system_name=data.get("system_name", ""), domain=data.get("domain", ""),
+        address=data.get("address", ""), description=data.get("description", ""),
+        severity=data.get("severity", "unknown"), harm=data.get("harm", ""),
+        detail=data.get("detail", ""), suggestion=data.get("suggestion", ""),
+        prove=data.get("prove", ""),
+        detail_images=_norm_img_list(data.get("detail_images")),
+        prove_images=_norm_img_list(data.get("prove_images")))
 
     # 新增报告 → 自动联动单位库 / 域名库（失败不影响报告保存）
     msg = "新增成功"
@@ -146,6 +191,89 @@ def report_add():
         logging.getLogger(__name__).warning("资产联动失败: %s", e)
         msg = "新增成功（资产自动登记异常，请稍后在资产页核对）"
     return jsonify(code=0, msg=msg, id=rid)
+
+
+@bp.post("/api/report/translate-names")
+def report_translate_names():
+    """把报告里仍是英文的漏洞名称批量翻译为中文（幂等，英文原名存 vul_name_en）。"""
+    rows = db.query_all(
+        "SELECT id, vul_name, IFNULL(vul_name_en,'') AS vul_name_en FROM reports WHERE status=0")
+    changed = []
+    for r in rows:
+        original = (r["vul_name_en"] or "").strip() or (r["vul_name"] or "").strip()
+        zh = to_chinese(original)
+        if zh and zh != r["vul_name"]:
+            db.execute("UPDATE reports SET vul_name=?, vul_name_en=?, updated_at=? WHERE id=?",
+                       (zh, original, now_display(), r["id"]))
+            changed.append({"id": r["id"], "from": r["vul_name"], "to": zh})
+    return jsonify(code=0,
+                   msg=f"已翻译 {len(changed)} 条报告的漏洞名称" if changed else "没有需要翻译的英文漏洞名称",
+                   data={"changed": changed, "updated": len(changed)})
+
+
+@bp.post("/api/report/batch-add")
+def report_batch_add():
+    """把扫描结果批量加入「报告管理」：同一单位/系统下逐条入库，并联动资产库。
+
+    入参 findings 兼容两种结构：
+      1) 扫描引擎统一发现格式 {source, data: {title, severity, url, evidence, description}}
+      2) 已归一化的 {vul_name, severity, address, description, detail, harm, suggestion}
+    """
+    data = request.get_json(silent=True) or {}
+    unit_name = (data.get("unit_name") or "").strip()
+    system_name = (data.get("system_name") or "").strip()
+    domain = (data.get("domain") or "").strip()
+    findings = data.get("findings")
+    if not unit_name:
+        return jsonify(code=1, msg="请填写单位名称"), 400
+    if not isinstance(findings, list) or not findings:
+        return jsonify(code=1, msg="请选择要加入报告的漏洞"), 400
+    if len(unit_name) > 200 or len(system_name) > 200:
+        return jsonify(code=1, msg="单位名称/系统名称过长（最多 200 字）"), 400
+
+    created, skipped, seen = [], 0, set()
+    for item in findings[:200]:
+        f = _normalize_finding(item)
+        name = f["vul_name"]
+        if not name:
+            skipped += 1
+            continue
+        # 同一次扫描里同名同地址的漏洞只入库一次
+        key = (name, f["address"])
+        if key in seen:
+            skipped += 1
+            continue
+        seen.add(key)
+        _sync_vuln_library(name, f["description"], f["harm"], f["suggestion"], f["severity"])
+        host = extract_host(f["domain"] or domain) or extract_host(f["address"])
+        created.append(_insert_report_record(
+            unit_name=unit_name, vul_name=name, system_name=system_name,
+            domain=host, address=f["address"], description=f["description"],
+            severity=f["severity"], harm=f["harm"], detail=f["detail"],
+            suggestion=f["suggestion"], prove=f["prove"]))
+    if not created:
+        return jsonify(code=1, msg="没有可加入的漏洞（缺少漏洞名称）"), 400
+
+    msg = f"已加入 {len(created)} 条报告"
+    if skipped:
+        msg += f"，跳过 {skipped} 条（重复或缺少漏洞名称）"
+    try:
+        hosts, unit_created = [], False
+        for rid in created:
+            row = db.query_one("SELECT domain FROM reports WHERE id=?", (rid,))
+            h = (row["domain"] or "").strip() if row else ""
+            if h and h not in hosts:
+                hosts.append(h)
+        for h in (hosts or [""])[:20]:
+            res = sync_unit_and_domain(unit_name, h)
+            unit_created = unit_created or bool(res.get("unit_created"))
+        if unit_created:
+            msg += f"，已自动登记新单位「{unit_name}」"
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("资产联动失败: %s", e)
+        msg += "（资产自动登记异常，请稍后在资产页核对）"
+    return jsonify(code=0, msg=msg, data={"ids": created, "count": len(created)})
 
 
 @bp.get("/api/report/unit-assets")
@@ -285,8 +413,9 @@ def unit_search():
 def vuln_search():
     q = request.args.get("q", "").strip()
     rows = db.query_all(
-        "SELECT id, name, severity, description, harm, suggestion FROM vulnerabilities WHERE name LIKE ? LIMIT 10",
-        (f"%{q}%",))
+        "SELECT id, name, IFNULL(name_en,'') AS name_en, severity, description, harm, suggestion "
+        "FROM vulnerabilities WHERE name LIKE ? OR name_en LIKE ? LIMIT 10",
+        (f"%{q}%", f"%{q}%"))
     return jsonify(code=0, data=[dict(r) for r in rows])
 
 

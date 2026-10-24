@@ -47,3 +47,9 @@ scan-engine/frontend/dist/
 scan-engine/**/*.orig
 scan-engine/**/*.bak-*
 scan-engine/backend/data/
+
+# ==================== 主站前端（React） ====================
+# 源码在 frontend/；node_modules 不入库。
+# 构建产物 static/app/ 需要入库：Windows 双击「启动智安鉴.bat」只跑 Python，没有 Node 构建环境。
+frontend/node_modules/
+frontend/dist/
