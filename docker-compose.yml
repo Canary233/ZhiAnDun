@@ -2,7 +2,8 @@ name: zhianjian
 
 # 智安鉴 + 内置漏洞扫描引擎（原 Shelling）一体化编排
 # 代码全部来自本仓库：根目录=智安鉴(Flask/8080)，scan-engine/=扫描引擎(FastAPI/Celery/Kali/Vite)
-# 数据：智安鉴用 ./data（SQLite）；引擎用下面显式命名的卷（沿用历史卷名，绝不新建空卷）
+# 数据：智安鉴业务数据存 MySQL（mysql_data 卷），导出文件/图片/背景图仍在 ./data；
+#       引擎用下面显式命名的卷（沿用历史卷名，绝不新建空卷）
 services:
 
   # ---------------- 智安鉴（业务系统）----------------
@@ -20,14 +21,49 @@ services:
       - ZS_PORT=8080
       - ZS_NO_BROWSER=1
       - TZ=Asia/Shanghai
+      - ZS_DB_HOST=mysql
+      - ZS_DB_PORT=3306
+      - ZS_DB_NAME=${MYSQL_DATABASE:-zhianjian}
+      - ZS_DB_USER=${MYSQL_USER:-zhianjian}
+      - ZS_DB_PASSWORD=${MYSQL_PASSWORD:-zhianjian_pass_2026}
     volumes:
       - ./data:/app/data
       - ./config.json:/app/config.json
     networks:
       - app_network
     depends_on:
+      mysql:
+        condition: service_healthy
       backend:
         condition: service_started
+
+  # ---------------- 智安鉴 业务数据库（MySQL 8）----------------
+  mysql:
+    image: mysql:8.0
+    container_name: zhianjian-mysql
+    restart: always
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-zhianjian_root_2026}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-zhianjian}
+      MYSQL_USER: ${MYSQL_USER:-zhianjian}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-zhianjian_pass_2026}
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   # ---------------- 扫描引擎：数据库与缓存 ----------------
   postgres:
@@ -222,3 +258,6 @@ volumes:
   frontend_node_modules:
     external: true
     name: 64ddc45c45d758fe80da5d361408c05a4dce5a9a75eb95eca1e215696d61e6a7
+  # 智安鉴业务库（MySQL）：compose 自建卷，首次启动自动初始化
+  mysql_data:
+    name: zhianjian_mysql_data
